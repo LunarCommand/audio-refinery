@@ -1,0 +1,47 @@
+# GPU FP16 TFLOPS lookup table for detect_gpu_order().
+#
+# Values are dense (non-sparse) FP16 TFLOPS:
+#   - Consumer GPUs: base shader throughput (non-tensor), matching the 3090/4090 baseline.
+#   - Data center GPUs (A100, H100, L4, T4): Tensor Core FP16, since those
+#     architectures route virtually all FP16 inference through Tensor Cores.
+#
+# GPU names must match nvidia-smi output exactly. To check your GPU names:
+#   nvidia-smi --query-gpu=name --format=csv,noheader
+#
+# NOTE — "NVIDIA " prefix: some Linux drivers omit it for data center SKUs,
+# reporting e.g. "A100-SXM4-80GB" rather than "NVIDIA A100-SXM4-80GB".
+# The lookup code tries both variants automatically, so one entry covers both.
+#
+# GPUs listed here rank above unlisted GPUs. Unlisted GPUs fall back to a
+# (rounded VRAM GB, max SM clock) heuristic, which is unreliable across
+# GPU generations — add any cloud GPUs you use to get correct ordering.
+#
+# Sources: https://www.techpowerup.com/gpu-specs/
+
+[tflops]
+
+# ── Zorac workstation ──────────────────────────────────────────────────────────
+"NVIDIA GeForce RTX 3090"        = 35.6
+"NVIDIA GeForce RTX 4090"        = 82.6
+
+# ── NVIDIA Ada / Ampere consumer ──────────────────────────────────────────────
+"NVIDIA GeForce RTX 3090 Ti"     = 40.0
+"NVIDIA GeForce RTX 4080"        = 48.7
+"NVIDIA GeForce RTX 4080 SUPER"  = 52.2
+"NVIDIA GeForce RTX 5090"        = 104.8   # Blackwell, non-tensor FP16
+
+# ── Data center / Cloud ────────────────────────────────────────────────────────
+# A100: raw FP16 ≈ 78 TFLOPS; Tensor Core FP16 = 312 TFLOPS.
+# Using 78.0 as a conservative baseline — actual throughput depends on whether
+# the library (WhisperX, Demucs) hits Tensor Core paths. Adjust if you observe
+# that your workload saturates Tensor Cores.
+"NVIDIA A100-SXM4-40GB"          = 78.0
+"NVIDIA A100-SXM4-80GB"          = 78.0
+"NVIDIA A10G"                    = 31.5
+
+# H100 SXM (700 W+) is vastly faster than H100 PCIe (350 W cap).
+"NVIDIA H100 80GB HBM3"          = 495.0   # SXM5, Tensor Core FP16
+"NVIDIA H100 PCIe"               = 204.9   # PCIe, Tensor Core FP16
+
+"NVIDIA L4"                      = 121.0   # Tensor Core FP16
+"Tesla T4"                       = 65.0    # Tensor Core FP16

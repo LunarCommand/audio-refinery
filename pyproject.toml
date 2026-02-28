@@ -1,0 +1,55 @@
+[project]
+name = "audio-refinery"
+version = "0.1.0"
+description = "GPU-accelerated audio processing pipeline: vocal separation, speaker diarization, transcription, and sentiment analysis."
+authors = [{ name = "commander" }]
+requires-python = ">=3.11,<3.12"
+readme = "README.md"
+license = { text = "MIT" }
+
+dependencies = [
+    "torch==2.1.2",
+    "torchaudio==2.1.2",
+    "demucs==4.0.1",
+    "soundfile==0.12.1",
+    "pyannote.audio>=3.1.1",
+    "python-dotenv",
+    "pydantic",
+    "numpy<2.0.0",
+    "pandas",
+    "ffmpeg-python",
+    "click>=8.1",
+    "rich>=13.0",
+    "transformers>=4.30.0",
+]
+
+[project.optional-dependencies]
+conflicting = [
+    "whisperx @ git+https://github.com/m-bain/whisperX.git@v3.1.1",
+]
+dev = [
+    "ruff",
+    "pytest",
+    "pytest-mock",
+]
+
+[project.scripts]
+audio-refinery = "src.cli:cli"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require real Demucs + GPU (deselect with '-m \"not integration\"')",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.format]
+quote-style = "double"
