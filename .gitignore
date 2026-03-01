@@ -15,6 +15,10 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+coverage.xml
+
+# Type checking
+.mypy_cache/
 
 # Editor
 .vscode/
@@ -23,5 +27,3 @@ htmlcov/
 *.swo
 .DS_Store
 
-# UV
-uv.lock
