@@ -1,5 +1,6 @@
 """Unit tests for src.diarizer — all Pyannote calls are mocked."""
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -37,8 +38,13 @@ class TestLoadPipeline:
         mock_pipeline_cls = MagicMock()
         mock_pipeline_cls.from_pretrained.return_value = mock_pipeline
 
-        # Pipeline is imported locally inside load_pipeline, so patch at the source.
-        with patch("pyannote.audio.Pipeline", mock_pipeline_cls):
+        # `load_pipeline` does a local `from pyannote.audio import Pipeline`.
+        # Patching the live attribute triggers the real module import, which pulls in
+        # matplotlib and crashes in headless CI. Pre-populate sys.modules instead so
+        # the local import inside load_pipeline picks up the mock without any I/O.
+        mock_pa = MagicMock()
+        mock_pa.Pipeline = mock_pipeline_cls
+        with patch.dict(sys.modules, {"pyannote.audio": mock_pa}):
             result = load_pipeline(DEFAULT_MODEL, "cuda", "hf_fake")
 
         mock_pipeline_cls.from_pretrained.assert_called_once_with(DEFAULT_MODEL)
@@ -49,7 +55,9 @@ class TestLoadPipeline:
         mock_pipeline_cls = MagicMock()
         mock_pipeline_cls.from_pretrained.side_effect = RuntimeError("model not found")
 
-        with patch("pyannote.audio.Pipeline", mock_pipeline_cls):
+        mock_pa = MagicMock()
+        mock_pa.Pipeline = mock_pipeline_cls
+        with patch.dict(sys.modules, {"pyannote.audio": mock_pa}):
             with pytest.raises(DiarizationError, match="Failed to load Pyannote pipeline"):
                 load_pipeline(DEFAULT_MODEL, "cuda", "hf_fake")
 

@@ -82,13 +82,13 @@ DEFAULT_SENTIMENT_DIR = Path("/audio/test/sentiment")
 
 def _reset_vram(device: str) -> None:
     """Reset peak VRAM stats for the given device before a stage begins."""
-    if _has_torch and device.startswith("cuda"):
+    if _has_torch and device.startswith("cuda") and _torch.cuda.is_available():
         _torch.cuda.reset_peak_memory_stats(device)
 
 
 def _read_vram(device: str) -> int | None:
     """Return peak VRAM allocated (bytes) since the last reset, or None on CPU."""
-    if _has_torch and device.startswith("cuda"):
+    if _has_torch and device.startswith("cuda") and _torch.cuda.is_available():
         return _torch.cuda.max_memory_allocated(device)
     return None
 
