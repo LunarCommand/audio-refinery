@@ -1,5 +1,6 @@
 """GPU availability utilities — queries nvidia-smi for active compute processes."""
 
+import contextlib
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -44,10 +45,8 @@ def query_compute_processes(device_index: int) -> list[GpuProcess]:
     for line in result.stdout.strip().splitlines():
         parts = [p.strip() for p in line.split(",")]
         if len(parts) >= 2:
-            try:
+            with contextlib.suppress(ValueError):
                 processes.append(GpuProcess(pid=int(parts[0]), used_memory_mib=int(parts[1])))
-            except ValueError:
-                pass
     return processes
 
 
@@ -75,10 +74,7 @@ def lookup_tflops(name: str, table: dict[str, float]) -> float | None:
     """
     if name in table:
         return table[name]
-    if name.startswith("NVIDIA "):
-        alt = name[len("NVIDIA ") :]
-    else:
-        alt = f"NVIDIA {name}"
+    alt = name[len("NVIDIA ") :] if name.startswith("NVIDIA ") else f"NVIDIA {name}"
     return table.get(alt)
 
 

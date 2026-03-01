@@ -1,7 +1,7 @@
 """Tests for shared Pydantic models."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.models.audio import AudioFileInfo, SeparationResult
@@ -18,7 +18,7 @@ def _make_audio_info(**overrides) -> AudioFileInfo:
         "subtype": "PCM_16",
     }
     defaults.update(overrides)
-    return AudioFileInfo(**defaults)
+    return AudioFileInfo(**defaults)  # type: ignore[arg-type]
 
 
 class TestAudioFileInfo:
@@ -46,7 +46,7 @@ class TestAudioFileInfo:
 
 class TestSeparationResult:
     def _make_result(self, **overrides) -> SeparationResult:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         defaults = {
             "input_file": Path("/audio/side_a.wav"),
             "input_info": _make_audio_info(),
@@ -60,7 +60,7 @@ class TestSeparationResult:
             "completed_at": now,
         }
         defaults.update(overrides)
-        return SeparationResult(**defaults)
+        return SeparationResult(**defaults)  # type: ignore[arg-type]
 
     def test_construction(self):
         result = self._make_result()

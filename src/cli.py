@@ -1155,7 +1155,7 @@ def pipeline(
         console.print(fail_table)
 
     # ── Persist summary JSON ───────────────────────────────────────────────
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     stages_data = {
         "separation": {
@@ -1212,7 +1212,7 @@ def pipeline(
         }
 
     summary_data = {
-        "run_at": datetime.now(timezone.utc).isoformat(),
+        "run_at": datetime.now(UTC).isoformat(),
         "total_discovered": total,
         "total_time_seconds": round(total_time, 2),
         "avg_time_per_file_seconds": round(pipeline_avg, 2),
@@ -1392,7 +1392,7 @@ def pipeline_parallel(
       <base>/transcription/ — transcription JSON output (created if absent)
       <base>/summary/       — per-worker summaries + combined_report.json
     """
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
     from pathlib import Path
 
     from src.pipeline import discover_files, partition_ids
@@ -1765,7 +1765,7 @@ def pipeline_parallel(
 
         # ── Timing summary ─────────────────────────────────────────────────
         combined_avg = total_time / total_processed if total_processed else 0.0
-        for w, w_summary in zip(workers, worker_summaries):
+        for w, w_summary in zip(workers, worker_summaries, strict=False):
             avg = w_summary.get("avg_time_per_file_seconds", 0.0) if w_summary else 0.0
             console.print(f"[dim]Worker {w['label']} ({w['device']}):  avg/file {_fmt_time(avg)}[/dim]")
         console.print(
@@ -1806,7 +1806,7 @@ def pipeline_parallel(
         if readings
     } or None
     combined_report = {
-        "run_at": datetime.now(timezone.utc).isoformat(),
+        "run_at": datetime.now(UTC).isoformat(),
         "total_discovered": len(all_ids),
         "total_time_seconds": round(total_time, 2),
         "total_audio_hours": round(sum(s.get("total_audio_hours", 0.0) for s in worker_summaries if s), 4),

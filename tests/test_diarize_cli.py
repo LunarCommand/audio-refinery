@@ -1,7 +1,7 @@
 """CLI tests for the `audio-refinery diarize` subcommand."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -15,7 +15,7 @@ from src.models.diarization import DiarizationResult, SpeakerSegment
 
 @pytest.fixture
 def sample_diarization_result(fake_wav):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     info = AudioFileInfo(
         path=fake_wav,
         sample_rate=44100,

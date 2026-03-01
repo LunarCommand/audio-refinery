@@ -8,7 +8,7 @@ step is meant to be run as its own CLI invocation.
 import os
 import time
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import huggingface_hub
@@ -147,7 +147,7 @@ def diarize(
         token = _resolve_hf_token(hf_token)
         pipeline = load_pipeline(model, device, token)
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     t0 = time.monotonic()
 
     try:
@@ -163,7 +163,7 @@ def diarize(
         raise DiarizationError(f"Pyannote pipeline failed: {exc}") from exc
 
     processing_time = time.monotonic() - t0
-    completed_at = datetime.now(timezone.utc)
+    completed_at = datetime.now(UTC)
 
     segments: list[SpeakerSegment] = []
     for turn, _, speaker in annotation.itertracks(yield_label=True):

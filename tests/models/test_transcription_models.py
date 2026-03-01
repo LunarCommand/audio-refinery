@@ -1,7 +1,7 @@
 """Unit tests for transcription Pydantic models."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -86,7 +86,7 @@ class TestTranscriptSegment:
 
 class TestTranscriptionResult:
     def test_construction(self, sample_audio_info):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         segments = [
             TranscriptSegment(
                 text="Spider-Man swings into action.",
@@ -119,7 +119,7 @@ class TestTranscriptionResult:
         assert result.language_probability is None
 
     def test_optional_fields(self, sample_audio_info):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = TranscriptionResult(
             input_file=Path("/tmp/vocals.wav"),
             input_info=sample_audio_info,
@@ -140,7 +140,7 @@ class TestTranscriptionResult:
         assert result.diarization_file == Path("/tmp/diarization.json")
 
     def test_json_roundtrip(self, sample_audio_info):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         words = [WordSegment(word="Quickly", start=0.0, end=0.5, score=0.95, speaker="SPEAKER_00")]
         segments = [TranscriptSegment(text="Quickly!", start=0.0, end=0.8, words=words, speaker="SPEAKER_00")]
         result = TranscriptionResult(

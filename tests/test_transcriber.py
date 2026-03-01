@@ -1,6 +1,7 @@
 """Unit tests for src.transcriber — all whisperx calls are mocked."""
 
 import sys
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -147,7 +148,7 @@ class TestBuildSegments:
         assert segs[0].words[0].speaker == "SPEAKER_00"
 
     def test_missing_optional_fields_handled(self):
-        raw = [{}]
+        raw: list[dict] = [{}]
         segs = _build_segments(raw)
         assert segs[0].text == ""
         assert segs[0].start == 0.0
@@ -371,12 +372,12 @@ class TestDiarizationMerge:
 
 def _make_diarization_json(fake_wav: Path, tmp_path: Path) -> Path:
     """Write a minimal valid DiarizationResult JSON and return its path."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.models.audio import AudioFileInfo
     from src.models.diarization import DiarizationResult, SpeakerSegment
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     info = AudioFileInfo(
         path=fake_wav,
         sample_rate=44100,

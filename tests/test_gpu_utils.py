@@ -225,13 +225,12 @@ def test_warn_aborts_when_user_declines(tmp_path):
 
     with patch("src.gpu_utils.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="9999, 4096", stderr="")
-        with runner.isolated_filesystem():
-            with runner.isolation(input="n\n"):
-                try:
-                    _warn_if_gpu_busy(["cuda:0"])
-                    aborted = False
-                except SystemExit as exc:
-                    aborted = exc.code == 0
+        with runner.isolated_filesystem(), runner.isolation(input="n\n"):
+            try:
+                _warn_if_gpu_busy(["cuda:0"])
+                aborted = False
+            except SystemExit as exc:
+                aborted = exc.code == 0
     assert aborted, "Expected sys.exit(0) when user declines"
 
 

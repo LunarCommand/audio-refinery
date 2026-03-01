@@ -1,7 +1,7 @@
 """Unit tests for shared sentiment and updated transcription models."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.models.sentiment import SegmentSentiment, SentimentResult, SentimentScore
@@ -88,7 +88,7 @@ class TestSegmentSentiment:
 
 class TestSentimentResult:
     def _make(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return SentimentResult(
             transcription_file=Path("/audio/test/transcription/transcription_001.json"),
             segments=[
@@ -159,7 +159,7 @@ class TestTranscriptSegmentSentimentField:
 
 class TestTranscriptionResultSentimentApplied:
     def _minimal_tx_dict(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         return {
             "input_file": "/audio/test.wav",
             "input_info": {

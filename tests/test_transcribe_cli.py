@@ -1,7 +1,7 @@
 """CLI tests for the `audio-refinery transcribe` subcommand."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,7 +16,7 @@ from src.transcriber import TranscriptionError
 
 @pytest.fixture
 def sample_transcription_result(fake_wav):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     info = AudioFileInfo(
         path=fake_wav,
         sample_rate=44100,
@@ -63,7 +63,7 @@ def sample_transcription_result(fake_wav):
 
 @pytest.fixture
 def sample_result_with_speakers(fake_wav):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     info = AudioFileInfo(
         path=fake_wav,
         sample_rate=44100,

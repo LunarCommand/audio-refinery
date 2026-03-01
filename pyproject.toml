@@ -43,9 +43,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-conflicting = [
-    "whisperx @ git+https://github.com/m-bain/whisperX.git@v3.1.1",
-]
 dev = [
     "ruff>=0.9.0",
     "mypy>=1.8.0",
@@ -71,16 +68,24 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["src"]
 
+# whisperx conflicts with torchaudio==2.1.2 at the resolver level and cannot
+# be listed as an optional dependency — uv would fail to generate a lock file.
+# Install it separately after uv sync: make install-whisperx
+# This stanza tells uv to inject setuptools into whisperx's build environment.
+[tool.uv.extra-build-dependencies]
+whisperx = ["setuptools"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
     "integration: marks tests that require real Demucs + GPU (deselect with '-m \"not integration\"')",
 ]
-addopts = [
-    "-v",
-    "--cov=src",
-    "--cov-report=term-missing",
-    "--cov-report=xml",
+addopts = ["-v"]
+filterwarnings = [
+    # Third-party library warnings — not actionable from this project
+    "ignore:The get_cmap function was deprecated:DeprecationWarning",
+    "ignore:builtin type.*no __module__:DeprecationWarning",
+    "ignore:torchaudio._backend.set_audio_backend:UserWarning",
 ]
 
 [tool.coverage.run]
@@ -116,7 +121,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "SIM115"]
+"tests/*" = ["S101", "SIM115", "SIM117"]
 
 [tool.ruff.format]
 quote-style = "double"

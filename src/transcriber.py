@@ -11,7 +11,7 @@ import os
 import re
 import time
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.models.audio import AudioFileInfo
@@ -42,9 +42,8 @@ def _suppress_output():
     Catches print() output from third-party libraries (pytorch_lightning checkpoint
     upgrade notices, pyannote version mismatch messages) that bypass Python logging.
     """
-    with open(os.devnull, "w") as devnull:
-        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-            yield
+    with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+        yield
 
 
 DEFAULT_MODEL = "large-v3"
@@ -153,7 +152,7 @@ def transcribe(
     # Pass None to whisperx for auto-detection; otherwise pass the language code directly.
     wx_language = None if language == "auto" else language
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     t0 = time.monotonic()
 
     # Silence noisy version-mismatch and deprecation log output from third-party internals.
@@ -206,7 +205,7 @@ def transcribe(
                 raise TranscriptionError(f"Speaker assignment failed: {exc}") from exc
 
     processing_time = time.monotonic() - t0
-    completed_at = datetime.now(timezone.utc)
+    completed_at = datetime.now(UTC)
 
     segments = _build_segments(aligned.get("segments", []))
 

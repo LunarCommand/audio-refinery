@@ -1,7 +1,7 @@
 """Unit tests for src.sentiment_analyzer — all transformers calls are mocked."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -42,7 +42,7 @@ def _make_transcription(
     filename: str = "transcription_001.json",
 ) -> Path:
     """Write a minimal TranscriptionResult JSON to a temp file and return the path."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     audio_path = tmp_path / "audio_001.wav"
     audio_path.write_bytes(b"\x00" * 64)
     if segments is None:

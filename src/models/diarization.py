@@ -15,7 +15,7 @@ class SpeakerSegment(BaseModel):
     start_seconds: float
     end_seconds: float
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def duration_seconds(self) -> float:
         return round(self.end_seconds - self.start_seconds, 6)

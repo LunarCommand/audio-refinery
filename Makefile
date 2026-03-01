@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-verbose test-integration test-coverage lint lint-fix format format-check type-check clean pre-commit pre-commit-install all-checks ci dev-setup stats
+.PHONY: help install install-dev install-whisperx test test-verbose test-integration test-coverage lint lint-fix format format-check type-check clean pre-commit pre-commit-install all-checks ci dev-setup stats
 
 # Default target
 .DEFAULT_GOAL := help
@@ -9,23 +9,26 @@ help: ## Show this help message
 	@echo "Available commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install production dependencies
+install: ## Install production dependencies (excludes whisperx — see install-whisperx)
 	uv sync
 
-install-dev: ## Install development dependencies
+install-dev: ## Install development dependencies (excludes whisperx — see install-whisperx)
 	uv sync --extra dev
 
+install-whisperx: ## Install whisperx separately (must run after install or install-dev)
+	uv pip install --no-deps "whisperx @ git+https://github.com/m-bain/whisperX.git@v3.1.1"
+
 test: ## Run unit tests (no GPU required)
-	uv run pytest tests/ -m "not integration"
+	uv run python -m pytest tests/ -m "not integration"
 
 test-verbose: ## Run unit tests with verbose output
-	uv run pytest tests/ -m "not integration" -vv
+	uv run python -m pytest tests/ -m "not integration" -vv
 
 test-integration: ## Run integration tests (requires GPU + models)
-	uv run pytest tests/ -m "integration" -v
+	uv run python -m pytest tests/ -m "integration" -v
 
-test-coverage: ## Run unit tests with coverage report
-	uv run pytest tests/ -m "not integration" --cov=src --cov-report=term-missing --cov-report=html
+test-coverage: ## Run unit tests with coverage report (fails under 75%)
+	uv run python -m pytest tests/ -m "not integration" --cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=75
 	@echo ""
 	@echo "Coverage report generated in htmlcov/index.html"
 
@@ -63,15 +66,14 @@ ci: install-dev all-checks ## Run CI pipeline (install deps + all checks)
 	@echo ""
 	@echo "CI pipeline completed successfully!"
 
-dev-setup: install-dev pre-commit-install ## Complete development setup
+dev-setup: install-dev install-whisperx pre-commit-install ## Complete development setup (installs all deps including whisperx + hooks)
 	@echo ""
 	@echo "Development environment setup complete!"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  1. Copy .env.example to .env and add your HF_TOKEN"
-	@echo "  2. Install WhisperX separately: uv pip install 'whisperx @ git+https://github.com/m-bain/whisperX.git@v3.1.1'"
-	@echo "  3. Run 'make test' to verify everything works"
-	@echo "  4. Run 'audio-refinery --help' to see available commands"
+	@echo "  2. Run 'make test' to verify everything works"
+	@echo "  3. Run 'audio-refinery --help' to see available commands"
 
 stats: ## Show project statistics
 	@echo "Project Statistics:"

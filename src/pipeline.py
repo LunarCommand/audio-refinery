@@ -15,6 +15,7 @@ single-stage CLI use-cases.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 import warnings
@@ -261,10 +262,8 @@ def _cleanup_stem(path: Path) -> None:
     """Delete a stem file and its parent directory if it becomes empty."""
     if path.exists():
         path.unlink()
-    try:
+    with contextlib.suppress(OSError):
         path.parent.rmdir()
-    except OSError:
-        pass
 
 
 def _load_whisperx_model(
@@ -677,11 +676,10 @@ def run_pipeline(
     # discovered list (not just within the pending subset).
     file_index_map = {cid: i for i, (cid, _) in enumerate(files)}
 
-    if not pending:
-        if not enable_sentiment:
-            result.total_processing_time_seconds = round(time.monotonic() - t0, 2)
-            return result
-        # Sentiment only (all audio stages complete) — fall through to Pass 3.
+    if not pending and not enable_sentiment:
+        result.total_processing_time_seconds = round(time.monotonic() - t0, 2)
+        return result
+    # if not pending but enable_sentiment: fall through to Pass 3 (sentiment only).
 
     if pending:
         # ── Load audio models once for all pending files ───────────────────

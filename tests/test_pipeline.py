@@ -332,7 +332,7 @@ def test_diarization_model_load_failure_fails_all(
         result = run_diarization_stage(three_files, full_sep_result, tmp_path, tmp_path / "diar", hf_token="tok")
 
     assert all(not o.success for o in result.outcomes)
-    assert all("no model" in o.error for o in result.outcomes)
+    assert all("no model" in o.error for o in result.outcomes)  # type: ignore[operator]
 
 
 def test_diarization_error_continues(three_files: list, full_sep_result: StageResult, tmp_path: Path) -> None:
@@ -444,7 +444,7 @@ def test_transcription_model_load_failure_fails_all(
         result = run_transcription_stage(three_files, full_diar_result, tmp_path, tmp_path / "diar", tmp_path / "tx")
 
     assert all(not o.success for o in result.outcomes)
-    assert all("no whisperx" in o.error for o in result.outcomes)
+    assert all("no whisperx" in o.error for o in result.outcomes)  # type: ignore[operator]
 
 
 def test_transcription_error_continues(

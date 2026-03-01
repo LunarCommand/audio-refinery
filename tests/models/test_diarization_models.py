@@ -1,7 +1,7 @@
 """Unit tests for diarization Pydantic models."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -50,7 +50,7 @@ class TestSpeakerSegment:
 
 class TestDiarizationResult:
     def test_construction(self, sample_audio_info):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         segments = [
             SpeakerSegment(speaker_label="SPEAKER_00", start_seconds=0.0, end_seconds=2.0),
             SpeakerSegment(speaker_label="SPEAKER_01", start_seconds=2.5, end_seconds=5.0),
@@ -72,7 +72,7 @@ class TestDiarizationResult:
         assert result.max_speakers is None
 
     def test_speaker_hint_fields(self, sample_audio_info):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = DiarizationResult(
             input_file=Path("/tmp/vocals.wav"),
             input_info=sample_audio_info,
@@ -88,7 +88,7 @@ class TestDiarizationResult:
         assert result.max_speakers == 5
 
     def test_json_roundtrip(self, sample_audio_info):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         segments = [
             SpeakerSegment(speaker_label="SPEAKER_00", start_seconds=1.0, end_seconds=3.0),
         ]

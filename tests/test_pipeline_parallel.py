@@ -208,13 +208,12 @@ def test_worker_device_args(tmp_path: Path) -> None:
                 break
         return _successful_proc()
 
-    with patch("src.cli.subprocess.Popen", side_effect=fake_popen):
-        with patch("sys.argv", ["audio-refinery"]):
-            result = runner.invoke(
-                cli,
-                ["pipeline-parallel", "--base-dir", str(base), "--device", "cuda:0", "--device", "cuda:1"],
-                input="y\n",
-            )
+    with patch("src.cli.subprocess.Popen", side_effect=fake_popen), patch("sys.argv", ["audio-refinery"]):
+        result = runner.invoke(
+            cli,
+            ["pipeline-parallel", "--base-dir", str(base), "--device", "cuda:0", "--device", "cuda:1"],
+            input="y\n",
+        )
 
     assert result.exit_code == 0, result.output
     assert len(captured_cmds) == 2
@@ -316,23 +315,22 @@ def test_three_worker_manifests(tmp_path: Path) -> None:
                 break
         return _successful_proc()
 
-    with patch("src.cli.subprocess.Popen", side_effect=fake_popen):
-        with patch("sys.argv", ["audio-refinery"]):
-            result = runner.invoke(
-                cli,
-                [
-                    "pipeline-parallel",
-                    "--base-dir",
-                    str(base),
-                    "--device",
-                    "cuda:0",
-                    "--device",
-                    "cuda:1",
-                    "--device",
-                    "cuda:2",
-                ],
-                input="y\n",
-            )
+    with patch("src.cli.subprocess.Popen", side_effect=fake_popen), patch("sys.argv", ["audio-refinery"]):
+        result = runner.invoke(
+            cli,
+            [
+                "pipeline-parallel",
+                "--base-dir",
+                str(base),
+                "--device",
+                "cuda:0",
+                "--device",
+                "cuda:1",
+                "--device",
+                "cuda:2",
+            ],
+            input="y\n",
+        )
 
     assert result.exit_code == 0, result.output
     assert len(captured_cmds) == 3

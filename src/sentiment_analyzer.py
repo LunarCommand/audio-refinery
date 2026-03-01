@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.models.sentiment import SegmentSentiment, SentimentResult, SentimentScore
@@ -98,7 +98,7 @@ def analyze_sentiment(
     if pipeline is None:
         pipeline = load_sentiment_pipeline(model, device)
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     t0 = time.monotonic()
 
     segment_results: list[SegmentSentiment] = []
@@ -124,7 +124,7 @@ def analyze_sentiment(
             logger.warning("Sentiment analysis failed for segment at %.2fs: %s", seg.start, exc)
 
     processing_time = round(time.monotonic() - t0, 3)
-    completed_at = datetime.now(timezone.utc)
+    completed_at = datetime.now(UTC)
 
     if not segment_results:
         if not any(seg.text and seg.text.strip() for seg in transcription.segments):

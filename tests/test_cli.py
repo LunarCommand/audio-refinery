@@ -1,5 +1,7 @@
 """CLI tests using Click's CliRunner."""
 
+from datetime import UTC
+
 from click.testing import CliRunner
 
 from src.cli import cli
@@ -8,7 +10,7 @@ from src.cli import cli
 class TestSeparateCommand:
     def test_success(self, fake_wav, tmp_output_dir, mock_audio_info, mocker):
         """CLI prints success output on successful separation."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from src.models.audio import SeparationResult
 
@@ -21,8 +23,8 @@ class TestSeparateCommand:
             model_name="htdemucs",
             device="cpu",
             processing_time_seconds=1.23,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
 
         mocker.patch("src.cli.separate", return_value=mock_result)

@@ -8,7 +8,7 @@ separate() which shells out to Demucs.
 import shutil
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import soundfile as sf
@@ -118,13 +118,13 @@ def separate(
     cmd = build_demucs_command(input_file, output_dir, model, device, segment)
     vocals_path, no_vocals_path = predict_output_paths(input_file, output_dir, model)
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     t0 = time.monotonic()
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     processing_time = time.monotonic() - t0
-    completed_at = datetime.now(timezone.utc)
+    completed_at = datetime.now(UTC)
 
     if result.returncode != 0:
         raise SeparationError(

@@ -1,7 +1,7 @@
 """CLI tests for the `audio-refinery sentiment` subcommand."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,7 +15,7 @@ from src.sentiment_analyzer import SentimentError
 
 @pytest.fixture
 def sample_sentiment_result(tmp_path: Path):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     tx_file = tmp_path / "transcription_001.json"
     tx_file.write_text("{}")  # content doesn't matter — analyze_sentiment is mocked
     return SentimentResult(
