@@ -13,7 +13,7 @@ source .venv/bin/activate
 uv pip install torch==2.1.2 torchaudio==2.1.2 --extra-index-url https://download.pytorch.org/whl/cu121
 
 # Install whisperx in isolation to avoid ctranslate2/torch version conflicts
-uv pip install setuptools
+uv pip install "setuptools<74"
 uv pip install --no-deps --no-build-isolation "whisperx @ git+https://github.com/m-bain/whisperX.git@v3.1.1"
 # whisperx runtime deps (transformers must be <4.42 — newer versions require torch>=2.4)
 uv pip install "ctranslate2>=4.0" "faster-whisper>=1.0.0" "transformers>=4.35.0,<4.42.0" nltk
