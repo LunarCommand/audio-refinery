@@ -39,7 +39,7 @@ dependencies = [
     "ffmpeg-python",
     "click>=8.1",
     "rich>=13.0",
-    "transformers>=4.30.0",
+    "transformers>=4.30.0,<4.40.0",
 ]
 
 [project.optional-dependencies]

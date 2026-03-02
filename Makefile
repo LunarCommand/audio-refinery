@@ -15,8 +15,9 @@ install: ## Install production dependencies (excludes whisperx — see install-w
 install-dev: ## Install development dependencies (excludes whisperx — see install-whisperx)
 	uv sync --extra dev
 
-install-whisperx: ## Install whisperx separately (must run after install or install-dev)
-	uv pip install --no-deps "whisperx @ git+https://github.com/m-bain/whisperX.git@v3.1.1"
+install-whisperx: ## Install whisperx and its runtime deps separately (must run after install or install-dev)
+	uv pip install --no-deps "whisperx @ git+https://github.com/m-bain/whisperX.git@741ab9a2a8a1076c171e785363b23c55a91ceff1"
+	uv pip install "av==16.1.0" "ctranslate2==4.7.1" "faster-whisper==1.2.1" "flatbuffers==25.12.19" "nltk==3.9.2" "onnxruntime==1.24.1"
 
 test: ## Run unit tests (no GPU required)
 	uv run python -m pytest tests/ -m "not integration"
@@ -66,7 +67,10 @@ ci: install-dev all-checks ## Run CI pipeline (install deps + all checks)
 	@echo ""
 	@echo "CI pipeline completed successfully!"
 
-dev-setup: install-dev install-whisperx pre-commit-install ## Complete development setup (installs all deps including whisperx + hooks)
+install-torch-cuda: ## Reinstall PyTorch with CUDA 12.1 wheels (run after uv sync, which pulls CPU-only builds)
+	uv pip install torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+
+dev-setup: install-dev install-whisperx install-torch-cuda pre-commit-install ## Complete development setup (installs all deps including whisperx + hooks)
 	@echo ""
 	@echo "Development environment setup complete!"
 	@echo ""

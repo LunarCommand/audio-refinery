@@ -9,19 +9,19 @@ GPU-accelerated audio processing pipeline: vocal separation (Demucs), speaker di
 uv venv --python 3.11.14
 source .venv/bin/activate
 
-# Install PyTorch first (CUDA 12.1 wheel — adjust for your CUDA version)
-uv pip install torch==2.1.2 torchaudio==2.1.2 --extra-index-url https://download.pytorch.org/whl/cu121
+# Install all deps (uv sync, whisperx, CUDA torch wheels, pre-commit hooks)
+make dev-setup
 
-# Install whisperx in isolation to avoid ctranslate2/torch version conflicts
-uv pip install "setuptools<74"
-uv pip install --no-deps --no-build-isolation "whisperx @ git+https://github.com/m-bain/whisperX.git@v3.1.1"
-# whisperx runtime deps (transformers must be <4.42 — newer versions require torch>=2.4)
-uv pip install "ctranslate2>=4.0" "faster-whisper>=1.0.0" "transformers>=4.35.0,<4.42.0" nltk
+# Copy the env template and add your HuggingFace token
+cp .env.example .env
+# Edit .env and set HF_TOKEN=hf_your_token_here
 
-# Install the package and remaining deps
-uv pip install -e .
-uv pip install pytest pytest-mock  # for development
+# Verify the install
+make test
+audio-refinery --help
 ```
+
+> **CUDA note:** `uv sync` resolves torch from PyPI and installs the CPU build. `make dev-setup` automatically reinstalls `torch==2.1.2+cu121` and `torchaudio==2.1.2+cu121` (CUDA 12.1) as its final step. If your system uses a different CUDA version, run `make install-torch-cuda` after editing the wheel URLs in the Makefile.
 
 > **NumPy constraint:** `numpy<2.0.0` is pinned in `pyproject.toml`. Do not upgrade it — WhisperX and some audio libraries break with NumPy 2.x.
 
@@ -652,17 +652,22 @@ Notifications are fire-and-forget — a failure to deliver never blocks or abort
 ```bash
 uv venv --python 3.11.14
 source .venv/bin/activate
-uv pip install -e ".[dev]"
+
+# Install all deps including whisperx, CUDA torch, dev tools, and pre-commit hooks
+make dev-setup
+
+# Copy the env template and add your HuggingFace token
+cp .env.example .env
 
 # Run unit tests (no GPU required)
-pytest tests/ -m "not integration" -v
+make test
 
 # Run integration tests (requires GPU, HF_TOKEN, and test audio)
-pytest tests/ -m integration -v
+make test-integration
 
 # Lint and format
-ruff check src/ tests/
-ruff format src/ tests/
+make lint
+make format
 ```
 
 ---

@@ -53,13 +53,6 @@ DEFAULT_BATCH_SIZE = 16
 DEFAULT_LANGUAGE = "en"
 
 
-class TranscriptionError(Exception):
-    """Raised when transcription fails."""
-
-    def __init__(self, message: str):
-        super().__init__(message)
-
-
 def _parse_whisperx_device(device: str) -> tuple[str, int]:
     """Split a PyTorch-style device string for ctranslate2's separate API.
 
@@ -77,6 +70,13 @@ def _parse_whisperx_device(device: str) -> tuple[str, int]:
     if m:
         return "cuda", int(m.group(1))
     return device, 0
+
+
+class TranscriptionError(Exception):
+    """Raised when transcription fails."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
 
 
 def transcribe(
@@ -117,12 +117,7 @@ def transcribe(
     try:
         import whisperx
     except ImportError as exc:
-        raise TranscriptionError(
-            "whisperx is not installed. Install it with:\n"
-            "  uv pip install setuptools\n"
-            "  uv pip install --no-deps --no-build-isolation "
-            '"whisperx @ git+https://github.com/m-bain/whisperX.git@main"'
-        ) from exc
+        raise TranscriptionError("whisperx is not installed. Install it with:\n  make install-whisperx") from exc
 
     input_info: AudioFileInfo = probe_audio_file(input_file)
 
@@ -159,10 +154,6 @@ def transcribe(
     for _logger_name in _NOISY_LOGGERS:
         logging.getLogger(_logger_name).setLevel(logging.ERROR)
 
-    # ctranslate2 (whisperx backend) doesn't accept 'cuda:N' — split into device + index.
-    # load_align_model and align use PyTorch directly and understand 'cuda:N' fine.
-    ct2_device, ct2_device_index = _parse_whisperx_device(device)
-
     alignment_fallback = False
 
     with warnings.catch_warnings():
@@ -171,6 +162,7 @@ def transcribe(
         try:
             if _whisperx_model is None:
                 with _suppress_output():
+                    ct2_device, ct2_device_index = _parse_whisperx_device(device)
                     wx_model = whisperx.load_model(
                         model,
                         ct2_device,
