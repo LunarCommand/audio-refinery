@@ -1,3 +1,5 @@
+assets/
+
 # Python
 .venv/
 __pycache__/
