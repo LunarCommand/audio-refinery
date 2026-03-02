@@ -9,8 +9,54 @@ This guide covers setting up audio-refinery for development, testing, and contri
 - Python 3.11.x (strictly — pyannote.audio and WhisperX require 3.11)
 - `uv` package manager
 - Git
-- NVIDIA GPU with 10GB+ VRAM (for integration tests only)
+- NVIDIA GPU (see hardware requirements below)
 - `ffmpeg` installed on your system
+
+### Hardware Requirements
+
+**GPU VRAM**
+
+The three GPU-resident models have the following approximate VRAM footprints:
+
+| Model | Stage | Peak VRAM |
+|---|---|:---:|
+| Demucs `htdemucs` | Vocal separation | ~4 GB |
+| Pyannote `speaker-diarization-3.1` | Diarization | ~1 GB |
+| WhisperX `large-v3` | Transcription | ~10 GB |
+
+A **24 GB GPU** (RTX 3090, 3090 Ti, 4090, A5000, etc.) holds all three models simultaneously
+with room for a comfortable batch size (16–32). This is the recommended configuration for
+production use.
+
+A **10–12 GB GPU** can run each stage sequentially but must load and unload models between
+stages, adding roughly 10–30 seconds of overhead per file. The `--segment` flag can reduce peak
+VRAM during Demucs at the cost of slightly longer separation time.
+
+**RAM disk (strongly recommended for batch runs)**
+
+Demucs writes vocal stems to disk during separation. On persistent storage, this creates two
+problems: I/O latency (stems are large, sequential writes) and SSD write amplification
+(processing thousands of files induces measurable drive wear). A RAM disk (`tmpfs`) eliminates
+both at the cost of system RAM.
+
+The default scratch directory is `/mnt/fast_scratch`. Mount it before running the pipeline:
+
+```bash
+sudo mkdir -p /mnt/fast_scratch
+sudo mount -t tmpfs -o size=32G,mode=1777 tmpfs /mnt/fast_scratch
+```
+
+Size the RAM disk to at least 2× the largest expected vocal stem (~200 MB for a typical 5-minute
+file; ~1 GB for a 25-minute side). 8–32 GB covers virtually all real-world cases.
+
+For a single-file operation or small batches, the RAM disk is optional. The pipeline will ask
+for confirmation before falling back to local storage.
+
+**System RAM**
+
+256 GB is the reference configuration for sustained multi-GPU batch processing. 32–64 GB is
+sufficient for single-GPU use. The RAM disk reservation (if used) subtracts from available
+system RAM.
 
 ### Quick Setup
 

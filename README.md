@@ -1,6 +1,6 @@
 # Audio Refinery
 
-GPU-accelerated audio processing pipeline: vocal separation (Demucs), speaker diarization (Pyannote), transcription (WhisperX), and text sentiment analysis.
+GPU-accelerated audio processing pipeline: vocal separation (Demucs), speaker diarization (Pyannote), transcription (WhisperX), and text sentiment analysis. Its primary use case is building AI-ready audio databases — transforming raw recordings into structured, speaker-attributed JSON with word-level timestamps that feed directly into RAG pipelines, vector stores, and fine-tuning datasets. The pipeline uses a Ghost Track strategy: AI models run against a clean, music-free vocal stem to maximize accuracy, then the resulting metadata is applied back to the original audio, preserving its acoustic character. Designed to run on 24 GB consumer GPUs with all models resident in VRAM simultaneously, it processes large corpora in batch with no model reload overhead between files.
 
 ## Installation
 
@@ -380,7 +380,7 @@ This bounds scratch usage to roughly one file's worth of stems (~400 MB) at any 
 
 ### Resume behaviour
 
-By default the pipeline skips any file whose transcription output already exists and is non-empty. An interrupted run can be safely restarted. Use `--no-resume` to force full reprocessing.
+By default, the pipeline skips any file whose transcription output already exists and is non-empty. An interrupted run can be safely restarted. Use `--no-resume` to force full reprocessing.
 
 ### Summary file
 
@@ -392,6 +392,107 @@ At the end of every run, `<base>/summary/pipeline_summary.json` is written with 
 - **`No audio_*.wav files found`** — Source files must match the pattern `audio_<id>.wav`.
 - **Partial failures** — Check the failure table printed at the end of the run and `summary/pipeline_summary.json`.
 - **`Thermal shutdown: cuda:N at XX°C`** — The GPU exceeded `--temp-limit`. Wait for it to cool, then resume (completed files are skipped automatically).
+
+---
+
+## GPU Identification and Device Targeting
+
+CUDA and `nvidia-smi` use independent GPU numbering schemes by default, and they don't always
+agree. Without corrective configuration, `cuda:0` in PyTorch may refer to a different physical
+card than index `0` in `nvidia-smi`, making it impossible to reliably pin workloads to specific
+GPUs.
+
+Audio-refinery sets `CUDA_DEVICE_ORDER=PCI_BUS_ID` at startup, before any CUDA context is
+created. This forces both CUDA and `nvidia-smi` to enumerate GPUs in PCI bus order, so their
+indices always match.
+
+### Identifying your GPUs
+
+```bash
+# List all GPUs with their nvidia-smi index, name, and VRAM
+nvidia-smi --query-gpu=index,name,memory.total --format=csv
+```
+
+Example output on a dual-GPU system:
+
+```
+index, name, memory.total [MiB]
+0, NVIDIA GeForce RTX 3090 Ti, 24576 MiB
+1, NVIDIA GeForce RTX 4090, 24576 MiB
+```
+
+With `CUDA_DEVICE_ORDER=PCI_BUS_ID` set, `cuda:0` in any audio-refinery command maps to
+index 0 in this output, and `cuda:1` maps to index 1.
+
+### Device string conventions
+
+The `--device` flag uses PyTorch device syntax:
+
+| String   | Meaning                                                                  |
+|----------|--------------------------------------------------------------------------|
+| `cuda`   | Default GPU (typically `cuda:0` in PCI bus order)                        |
+| `cuda:0` | GPU at PCI bus index 0                                                   |
+| `cuda:1` | GPU at PCI bus index 1                                                   |
+| `cpu`    | CPU only — significantly slower; useful for testing or GPU-free machines |
+
+### Verifying device assignment
+
+Before a long batch run, confirm that `cuda:N` refers to the GPU you intend:
+
+```bash
+python -c "
+import os; os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+import torch
+for i in range(torch.cuda.device_count()):
+    print(f'cuda:{i} ->', torch.cuda.get_device_name(i))
+"
+```
+
+The output should match the `nvidia-smi` index order:
+
+```
+cuda:0 -> NVIDIA GeForce RTX 3090 Ti
+cuda:1 -> NVIDIA GeForce RTX 4090
+```
+
+### Automatic GPU ranking (pipeline-parallel)
+
+`audio-refinery pipeline-parallel` uses `detect_gpu_order()` to rank all available GPUs
+before assigning workers. The ranking uses FP16 TFLOPS from `src/gpu_tflops.toml` as the
+primary sort key, so the fastest GPU gets the first worker slot. GPUs not in the table fall
+back to a `(rounded VRAM GB, max SM clock)` heuristic — reliable within a generation but not
+across them.
+
+To check whether your GPU is in the table:
+
+```bash
+nvidia-smi --query-gpu=name --format=csv,noheader
+```
+
+Compare the output against the entries in `src/gpu_tflops.toml`. If your GPU is listed, it
+ranks above any unlisted GPU. If it is not, the heuristic applies — which may or may not
+produce the ordering you want.
+
+### Adding a GPU to the TFLOPS table
+
+If your GPU is not in `src/gpu_tflops.toml`, add it for correct ranking in multi-GPU setups:
+
+1. Get the exact name as `nvidia-smi` reports it:
+   ```bash
+   nvidia-smi --query-gpu=name --format=csv,noheader
+   ```
+
+2. Find the FP16 TFLOPS figure at [TechPowerUp GPU Specs](https://www.techpowerup.com/gpu-specs/).
+   Use the **Shader Performance** row for consumer GPUs, or **FP16 (half)** for data center GPUs.
+   See the comments in `src/gpu_tflops.toml` for guidance on which value to use.
+
+3. Add an entry to `src/gpu_tflops.toml`:
+   ```toml
+   "NVIDIA GeForce RTX 5080" = 86.4
+   ```
+
+The GPU name must match `nvidia-smi` output exactly. The lookup code automatically handles
+the presence or absence of the `NVIDIA ` prefix across driver versions.
 
 ---
 
@@ -531,6 +632,18 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
 ```
 
 Notifications are fire-and-forget — a failure to deliver never blocks or aborts the pipeline.
+
+---
+
+## Documentation
+
+| Document                             | Description                                                        |
+|--------------------------------------|--------------------------------------------------------------------|
+| [Architecture](docs/ARCHITECTURE.md) | Ghost Track pipeline design, model selection rationale, data model |
+| [Use Cases](docs/USE_CASES.md)       | Who uses this and for what                                         |
+| [Performance](docs/PERFORMANCE.md)   | Throughput benchmarks, scaling options, optimization guide         |
+| [Deployment](docs/DEPLOYMENT.md)     | Production patterns, async workers, Docker, monitoring             |
+| [Development](docs/DEVELOPMENT.md)   | Dev setup, testing, contributing, release process                  |
 
 ---
 
