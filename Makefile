@@ -79,6 +79,17 @@ dev-setup: install-dev install-whisperx install-torch-cuda pre-commit-install ##
 	@echo "  2. Run 'make test' to verify everything works"
 	@echo "  3. Run 'audio-refinery --help' to see available commands"
 
+test-slack: ## Send a test Slack notification to verify SLACK_WEBHOOK_URL is configured
+	@uv run python -c "\
+from dotenv import load_dotenv; \
+load_dotenv(); \
+import os, sys, json, urllib.request; \
+url = os.getenv('SLACK_WEBHOOK_URL') or (print('SLACK_WEBHOOK_URL is not set — add it to .env or export it') or sys.exit(1)); \
+data = json.dumps({'text': ':white_check_mark: *Test notification* from \`audio-refinery\` — Slack integration is working.'}).encode(); \
+req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'}); \
+urllib.request.urlopen(req, timeout=5); \
+print('Test notification sent — check your Slack channel')"
+
 stats: ## Show project statistics
 	@echo "Project Statistics:"
 	@echo "==================="
