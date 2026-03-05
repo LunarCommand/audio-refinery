@@ -21,7 +21,7 @@ DEFAULT_DEVICE = "cuda"
 
 
 class SeparationError(Exception):
-    """Raised when Demucs subprocess fails."""
+    """Raised when the Demucs subprocess fails."""
 
     def __init__(self, message: str, returncode: int | None = None, stderr: str = ""):
         super().__init__(message)
