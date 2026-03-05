@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 
 # Force PCI bus order so CUDA device indices match nvidia-smi numbering.
 # Must be set before any CUDA context is created.
@@ -1699,11 +1700,6 @@ def pipeline_parallel(
 
     total_time = time.monotonic() - t0
 
-    # ── Report exit status ──────────────────────────────────────────────────
-    for w in workers:
-        ok = w["rc"] == 0
-        status = "[green]OK[/green]" if ok else f"[red]FAILED (exit {w['rc']})[/red]"
-        console.print(f"Worker {w['label']} ({w['device']}): {status}")
     console.print(f"[dim]Total wall-clock time: {_fmt_time(total_time)}[/dim]\n")
 
     # ── Aggregate summaries ─────────────────────────────────────────────────
@@ -1721,6 +1717,19 @@ def pipeline_parallel(
         if summary:
             for f in summary.get("failures", []):
                 all_combined_failures.append({"worker": w["label"], "device": w["device"], **f})
+
+    # ── Report exit status ──────────────────────────────────────────────────
+    for i, w in enumerate(workers):
+        summary = worker_summaries[i]
+        if w["rc"] == 0:
+            status = "[green]OK[/green]"
+        elif summary is not None:
+            n_failures = len(summary.get("failures", []))
+            label = "failure" if n_failures == 1 else "failures"
+            status = f"[yellow]Completed ({n_failures} file {label})[/yellow]"
+        else:
+            status = f"[red]FAILED (exit {w['rc']})[/red]"
+        console.print(f"Worker {w['label']} ({w['device']}): {status}")
 
     _notif_processed = 0
     _notif_failures = 0
@@ -1776,6 +1785,10 @@ def pipeline_parallel(
 
     # ── Combined failure report (printed) ──────────────────────────────────
     if all_combined_failures:
+        failure_counts: Counter = Counter()
+        for f in all_combined_failures:
+            key = (f.get("worker", ""), f.get("device", ""), f.get("stage", ""), f.get("error", ""))
+            failure_counts[key] += 1
         fail_table = Table(
             title=f"Combined Failure Report ({len(all_combined_failures)} failures)",
             border_style="red",
@@ -1783,16 +1796,10 @@ def pipeline_parallel(
         fail_table.add_column("Worker", style="bold")
         fail_table.add_column("Device")
         fail_table.add_column("Stage")
-        fail_table.add_column("Content ID")
+        fail_table.add_column("Count", justify="right")
         fail_table.add_column("Error")
-        for f in all_combined_failures:
-            fail_table.add_row(
-                f.get("worker", ""),
-                f.get("device", ""),
-                f.get("stage", ""),
-                f.get("content_id", ""),
-                f.get("error", ""),
-            )
+        for (worker, device, stage, error), count in sorted(failure_counts.items()):
+            fail_table.add_row(worker, device, stage, str(count), error)
         console.print(fail_table)
 
     # ── Write combined_report.json (always) ────────────────────────────────
