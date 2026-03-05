@@ -56,7 +56,7 @@ DEFAULT_LANGUAGE = "en"
 def _parse_whisperx_device(device: str) -> tuple[str, int]:
     """Split a PyTorch-style device string for ctranslate2's separate API.
 
-    ctranslate2 (whisperx's backend) takes device and device_index as separate
+    ctranslate2 (whisperx's backend) takes the device and device_index as separate
     parameters and does not accept 'cuda:N' as a combined string.
     PyTorch-style load_align_model and align() still use the original string.
 
@@ -100,6 +100,8 @@ def transcribe(
         diarization_file: Optional path to a DiarizationResult JSON from step 2.
             When provided, speaker labels are merged into the transcript output.
         model: Whisper model size (default: 'large-v3').
+        _whisperx_model: Pre-loaded WhisperX model instance. When provided, model
+            loading is skipped (used by the pipeline for batch efficiency).
 
     Returns:
         TranscriptionResult with full provenance of the transcription run.
@@ -185,7 +187,7 @@ def transcribe(
             aligned = whisperx.align(
                 raw_result["segments"], align_model, metadata, audio, device, return_char_alignments=False
             )
-        except Exception:
+        except (RuntimeError, ValueError, OSError, KeyError):
             alignment_fallback = True
             aligned = raw_result
 
