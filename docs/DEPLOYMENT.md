@@ -191,12 +191,39 @@ with engine.connect() as conn:
 ## Docker Containerization
 
 Containerizing audio-refinery ensures that the PyTorch 2.1.2 + CUDA 12.1 dependency stack is
-portable and reproducible across machines, including cloud GPU instances.
+portable and reproducible across machines. The same image runs on a local GPU workstation and
+on a cloud GPU instance — the difference is how the image is built and delivered, and what
+scratch storage is available.
 
 ### Prerequisites
 
-Docker cannot access the GPU without the **NVIDIA Container Toolkit** installed and configured
-on the host. This is required regardless of whether you use `docker run` or `docker compose`.
+#### HuggingFace Token
+
+Pyannote speaker diarization uses gated models that require HuggingFace authentication:
+
+1. Create a free account at [huggingface.co](https://huggingface.co)
+2. Accept the model terms for [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+3. Generate a read token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+
+Pass the token via `-e HF_TOKEN` or the compose `environment:` block. Without it the diarization
+stage will fail with a 401 authentication error the first time it tries to download the model.
+
+#### NVIDIA Driver Version
+
+The `nvidia/cuda:12.1.1` base image requires **NVIDIA driver ≥ 525.85.12** on the host.
+Check before pulling the image:
+
+```bash
+nvidia-smi --query-gpu=driver_version --format=csv,noheader
+```
+
+If the driver is older than 525, update it before proceeding.
+
+#### NVIDIA Container Toolkit
+
+Docker cannot access the GPU without the NVIDIA Container Toolkit installed and configured on
+the host. This applies to both local workstations and cloud instances — most cloud GPU images
+include NVIDIA drivers but not the container toolkit.
 
 ```bash
 # Install the toolkit (Ubuntu / Debian)
@@ -265,7 +292,25 @@ RUN uv pip install torch==2.1.2+cu121 torchaudio==2.1.2+cu121 \
 CMD ["audio-refinery", "--help"]
 ```
 
-### docker-compose.yml
+### Building the Image
+
+```bash
+docker build -t audio-refinery:latest .
+```
+
+The build clones WhisperX from GitHub and downloads PyTorch CUDA wheels, so it requires internet
+access and takes 10–20 minutes on first run. Subsequent builds are faster due to layer caching,
+provided `pyproject.toml` has not changed.
+
+---
+
+### Running Locally (Workstation)
+
+For a local GPU workstation, build the image once and run it via compose for sustained batch
+runs, or `docker run` for one-off jobs. Audio data and the RAM disk are bind-mounted from the
+host, so the container has no persistent state of its own.
+
+**Sustained batch — docker-compose.yml:**
 
 ```yaml
 services:
@@ -279,8 +324,8 @@ services:
               device_ids: ['0']       # Pin to specific GPU by PCI ID
               capabilities: [gpu]
     volumes:
-      - /data/audio:/data             # Persistent audio storage
-      - /mnt/fast_scratch:/mnt/fast_scratch  # RAM disk (mount on host first)
+      - /data/audio:/data                          # Persistent audio storage
+      - /mnt/fast_scratch:/mnt/fast_scratch        # RAM disk (mount on host first)
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
@@ -290,36 +335,79 @@ services:
         --compute-type int8_float16
 ```
 
-### Ad-hoc docker run
-
-For one-off runs without compose:
+**Ad-hoc run:**
 
 ```bash
 docker run --rm --gpus '"device=0"' \
   -v /data/audio:/data \
+  -v /mnt/fast_scratch:/mnt/fast_scratch \
   -e HF_TOKEN="${HF_TOKEN}" \
   -e SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}" \
-  audio-refinery \
+  audio-refinery:latest \
   audio-refinery pipeline --base-dir /data/batch --compute-type int8_float16
 ```
 
-`--gpus '"device=0"'` pins to a specific GPU by index, matching the `device_ids: ['0']` in
-the compose file. Use `--gpus all` to expose all GPUs.
+`--gpus '"device=0"'` pins to a specific GPU by index. Use `--gpus all` to expose all GPUs.
 
-### Running in the cloud
+---
 
-On a cloud GPU instance without a RAM disk, substitute a high-bandwidth NVMe instance volume
-for `/mnt/fast_scratch`. Cloud GPU instances typically provide NVMe-backed instance storage at
-2–4 GB/s write throughput — adequate as a scratch substitute at the cost of some SSD wear.
+### Deploying to the Cloud
+
+Cloud deployment follows the same container pattern as local, with two differences: the image
+is delivered via a registry rather than built in place, and NVMe instance storage substitutes
+for the RAM disk.
+
+#### Instance Selection
+
+The recommended minimum is a **24 GB GPU** to hold all models resident simultaneously. On a
+10–12 GB GPU, models are loaded and unloaded between stages, adding 10–30 seconds of overhead
+per file. See [VRAM Footprint by Stage](#vram-footprint-by-stage) for a full breakdown.
+
+Common instance types that meet the 24 GB threshold: NVIDIA A10G (AWS g5), L4 (GCP g2), RTX
+3090 / 4090 (bare metal providers).
+
+#### Registry Workflow
+
+Build and push from your local machine (or a CI runner), then pull on the cloud instance:
 
 ```bash
-# Use a local NVMe volume as scratch instead of RAM disk
-audio-refinery pipeline \
-  --base-dir /data/batch \
-  --compute-type int8_float16
-  # The pipeline will prompt for confirmation before writing to local storage
-  # if /mnt/fast_scratch is not mounted
+# Build and push (local machine)
+docker build -t your-registry/audio-refinery:latest .
+docker push your-registry/audio-refinery:latest
+
+# Pull and run (cloud instance — after completing Prerequisites above)
+docker pull your-registry/audio-refinery:latest
+docker run --rm --gpus '"device=0"' \
+  -v /data/audio:/data \
+  -v /mnt/nvme:/mnt/fast_scratch \
+  -e HF_TOKEN="${HF_TOKEN}" \
+  -e SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}" \
+  your-registry/audio-refinery:latest \
+  audio-refinery pipeline --base-dir /data/batch --compute-type int8_float16
 ```
+
+Alternatively, build directly on the cloud instance if it has internet access and you want to
+skip managing a registry:
+
+```bash
+git clone https://github.com/LunarCommand/audio-refinery.git
+cd audio-refinery
+docker build -t audio-refinery:latest .
+```
+
+#### Scratch Storage
+
+Cloud GPU instances do not have a RAM disk. Use a high-bandwidth NVMe instance volume as scratch:
+
+```bash
+# Mount instance NVMe storage (device path varies by provider)
+sudo mkdir -p /mnt/nvme
+sudo mount /dev/nvme1n1 /mnt/nvme
+```
+
+Pass `/mnt/nvme` as the scratch bind mount (`-v /mnt/nvme:/mnt/fast_scratch`). Cloud NVMe
+instance storage typically provides 2–4 GB/s write throughput — adequate as a scratch substitute
+at the cost of some SSD wear.
 
 ---
 
