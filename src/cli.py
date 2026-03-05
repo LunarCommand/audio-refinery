@@ -1257,6 +1257,35 @@ def pipeline(
         completed=completed,
         failures=len(all_failures),
         elapsed_seconds=total_time,
+        stages={
+            "separation": {
+                "processed": sep_result.n_succeeded,
+                "skipped": sep_result.n_skipped,
+                "failed": sep_result.n_failed,
+            },
+            "diarization": {
+                "processed": diar_result.n_succeeded,
+                "skipped": diar_result.n_skipped,
+                "failed": diar_result.n_failed,
+            },
+            "transcription": {
+                "processed": tx_result.n_succeeded,
+                "skipped": tx_result.n_skipped,
+                "failed": tx_result.n_failed,
+            },
+            **(
+                {
+                    "sentiment": {
+                        "processed": sent_result.n_succeeded,
+                        "skipped": sent_result.n_skipped,
+                        "failed": sent_result.n_failed,
+                    }
+                }
+                if sentiment
+                else {}
+            ),
+        },
+        avg_per_file_seconds=pipeline_avg,
     )
 
     if all_failures:
@@ -1804,13 +1833,29 @@ def pipeline_parallel(
     combined_report_path.write_text(json.dumps(combined_report, indent=2))
     console.print(f"[dim]Combined report written to: {combined_report_path}[/dim]")
 
-    worker_statuses = [(w["label"], w["device"], w["rc"] == 0) for w in workers]
+    worker_statuses = []
+    for i, w in enumerate(workers):
+        ws = worker_summaries[i]
+        n_fail = len(ws.get("failures", [])) if ws is not None else 0
+        worker_statuses.append((w["label"], w["device"], w["rc"], n_fail))
+    _parallel_stages: dict[str, dict[str, int]] | None = None
+    if any(s for s in worker_summaries):
+        _parallel_stages = {
+            stage_key: {
+                "processed": _agg(stage_key, "processed"),
+                "skipped": _agg(stage_key, "skipped"),
+                "failed": _agg(stage_key, "failed"),
+            }
+            for stage_key in (["separation", "diarization", "transcription"] + (["sentiment"] if sentiment else []))
+        }
     notify_pipeline_parallel_complete(
         worker_statuses=worker_statuses,
         total_discovered=len(all_ids),
         total_processed=_notif_processed,
         failures=_notif_failures,
         elapsed_seconds=total_time,
+        stages=_parallel_stages,
+        avg_per_file_seconds=combined_avg if _notif_processed else 0.0,
     )
 
     if not all(w["rc"] == 0 for w in workers):
