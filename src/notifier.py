@@ -1,7 +1,7 @@
 """Slack webhook notifications for pipeline events.
 
 Set ``SLACK_WEBHOOK_URL`` in your ``.env`` file or the shell environment
-to enable.  All functions are fire-and-forget — errors are silently ignored so
+to enable.  All functions are fire-and-forget — errors are silently ignored, so
 a notification failure can never block or abort the pipeline.
 """
 
@@ -12,17 +12,16 @@ import os
 import urllib.error
 import urllib.request
 
+try:
+    from dotenv import load_dotenv as _load_dotenv
+except ImportError:
+    _load_dotenv = None  # type: ignore[assignment]
+
 
 def _send(text: str) -> None:
     """POST a plain-text Slack message to the configured webhook URL, if any."""
-    # Load .env lazily so the webhook URL is available even if this fires before
-    # the diarizer stage (which is when load_dotenv() normally runs).
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv()
-    except ImportError:
-        pass
+    if _load_dotenv is not None:
+        _load_dotenv()
 
     url = os.getenv("SLACK_WEBHOOK_URL")
     if not url:
@@ -31,7 +30,7 @@ def _send(text: str) -> None:
         data = json.dumps({"text": text}).encode()
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=5)
-    except Exception:
+    except (urllib.error.URLError, OSError, ValueError):
         pass  # Never raise — notification failure must not interrupt the pipeline
 
 
