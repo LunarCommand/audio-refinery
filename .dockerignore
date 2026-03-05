@@ -1,0 +1,45 @@
+# Virtual environment and build artifacts
+.venv/
+*.egg-info/
+dist/
+build/
+__pycache__/
+*.py[cod]
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Type / lint caches
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and local config
+.env
+assets/
+
+# Dev tooling
+.pre-commit-config.yaml
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Git
+.git/
+.github/
+
+# Docs and non-runtime files
+docs/
+tests/
+CHANGELOG.md
+CONTRIBUTING.md
+CLAUDE.md
+SECURITY.md
+Makefile
+README.md
+uv.lock

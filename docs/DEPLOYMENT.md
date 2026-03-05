@@ -193,6 +193,34 @@ with engine.connect() as conn:
 Containerizing audio-refinery ensures that the PyTorch 2.1.2 + CUDA 12.1 dependency stack is
 portable and reproducible across machines, including cloud GPU instances.
 
+### Prerequisites
+
+Docker cannot access the GPU without the **NVIDIA Container Toolkit** installed and configured
+on the host. This is required regardless of whether you use `docker run` or `docker compose`.
+
+```bash
+# Install the toolkit (Ubuntu / Debian)
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+
+# Configure Docker to use the NVIDIA runtime
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+Verify GPU access inside a container before building:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
+```
+
+This should print the same `nvidia-smi` output as the host. If it fails, the toolkit is not
+installed correctly — audio-refinery will not be able to use the GPU inside the container.
+
 ### Dockerfile
 
 ```dockerfile
@@ -212,20 +240,27 @@ USER refinery
 # Install uv
 RUN pip install --user uv
 
-# Install PyTorch first (CUDA 12.1 wheel)
-RUN uv pip install torch==2.1.2 torchaudio==2.1.2 \
-    --extra-index-url https://download.pytorch.org/whl/cu121
-
-# Install WhisperX and runtime deps (must be separate due to ctranslate2 constraints)
-RUN uv pip install setuptools && \
-    uv pip install --no-deps --no-build-isolation \
-      "whisperx @ git+https://github.com/m-bain/whisperX.git@v3.1.1" && \
-    uv pip install "ctranslate2>=4.0" "faster-whisper>=1.0.0" \
-      "transformers>=4.35.0,<4.42.0" nltk
-
-# Copy and install the package
+# Copy and install the package (resolves main deps; may pull CPU-only torch)
 COPY --chown=refinery:refinery . .
 RUN uv pip install -e .
+
+# Install WhisperX at the pinned commit — no-deps to avoid overwriting torch
+# v3.1.1 tag has the old API without device_index; use the correct commit instead
+RUN uv pip install --no-deps \
+    "whisperx @ git+https://github.com/m-bain/whisperX.git@741ab9a2a8a1076c171e785363b23c55a91ceff1"
+
+# Install pinned WhisperX runtime deps
+# transformers must stay <4.40.0 — 4.40+ uses torch.utils._pytree.register_pytree_node
+# which was added in PyTorch 2.2 and breaks with the pinned 2.1.2
+RUN uv pip install \
+    "av==16.1.0" "ctranslate2==4.7.1" "faster-whisper==1.2.1" \
+    "flatbuffers==25.12.19" "nltk==3.9.2" "onnxruntime==1.24.1" \
+    "transformers>=4.30.0,<4.40.0"
+
+# Reinstall PyTorch with CUDA 12.1 wheels last — uv pip install -e . above may have
+# pulled CPU-only builds; this guarantees the CUDA wheel is what's actually used
+RUN uv pip install torch==2.1.2+cu121 torchaudio==2.1.2+cu121 \
+    --extra-index-url https://download.pytorch.org/whl/cu121
 
 CMD ["audio-refinery", "--help"]
 ```
@@ -254,6 +289,22 @@ services:
         --base-dir /data/batch
         --compute-type int8_float16
 ```
+
+### Ad-hoc docker run
+
+For one-off runs without compose:
+
+```bash
+docker run --rm --gpus '"device=0"' \
+  -v /data/audio:/data \
+  -e HF_TOKEN="${HF_TOKEN}" \
+  -e SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}" \
+  audio-refinery \
+  audio-refinery pipeline --base-dir /data/batch --compute-type int8_float16
+```
+
+`--gpus '"device=0"'` pins to a specific GPU by index, matching the `device_ids: ['0']` in
+the compose file. Use `--gpus all` to expose all GPUs.
 
 ### Running in the cloud
 
