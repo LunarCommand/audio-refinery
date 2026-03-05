@@ -28,6 +28,7 @@ try:
 
     _has_torch = True
 except ImportError:
+    _torch = None  # type: ignore[assignment]
     _has_torch = False
 
 from src.diarizer import (
@@ -218,7 +219,7 @@ def partition_ids(ids: list[str], n: int = 2) -> list[list[str]]:
 
     Worker i gets positions i, i+n, i+2n, ... This distributes workload more evenly
     than a naive chunked split when file durations correlate with naming. With n=2,
-    behavior is identical to the previous dual-worker implementation.
+    the behavior is identical to the previous dual-worker implementation.
 
     Args:
         ids: Ordered list of content_id strings (typically from discover_files()).
@@ -594,6 +595,7 @@ def run_pipeline(
         demucs_output_dir: Demucs output root directory (RAM disk strongly recommended).
         diarization_dir: Directory for diarization_<content_id>.json files.
         transcription_dir: Directory for transcription_<content_id>.json files.
+        sentiment_dir: Directory for sentiment_<content_id>.json files.
         device: GPU device string ('cuda', 'cuda:N', or 'cpu').
         segment: Demucs segment size in seconds (VRAM optimisation).
         compute_type: WhisperX CTranslate2 compute type.
@@ -662,7 +664,7 @@ def run_pipeline(
 
     # ── Load sentiment model if needed ────────────────────────────────────
     # Text-only; independent of audio model availability. Loaded before the
-    # early-return check so a sentiment-only run (all audio done, sentiment
+    # early-return check, so a sentiment-only run (all audio done, sentiment
     # pending) falls through to Pass 3 rather than returning early.
     sentiment_pipeline_obj = None
     sentiment_load_error: str | None = None
@@ -738,7 +740,7 @@ def run_pipeline(
                     _sep_rtf = round(sep.processing_time_seconds / _sep_dur, 3) if _sep_dur > 0 else None
                     _sep_vram = _read_vram(device)
                     # no_vocals.wav is only needed by step 6 (CLAP). Delete it now unless
-                    # events are enabled, to keep RAM disk usage as low as possible.
+                    # events are enabled to keep RAM disk usage as low as possible.
                     if not keep_scratch and not enable_events:
                         _cleanup_stem(no_vocals)
                     result.separation.outcomes.append(
@@ -874,7 +876,7 @@ def run_pipeline(
 
     # ── Pass 3: Text Sentiment Analysis ───────────────────────────────────────
     # Text-only step — reads the transcription JSON, produces per-segment scores.
-    # Runs after all audio stages so it covers both freshly-transcribed files
+    # Runs after all audio stages, so it covers both freshly-transcribed files
     # (processed in Pass 2) and previously-transcribed files (fast-tracked in
     # Pass 1). This means a first run with --sentiment on a previously-transcribed
     # base-dir produces sentiment for all files without re-running audio stages.
