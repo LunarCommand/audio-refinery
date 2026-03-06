@@ -1809,14 +1809,24 @@ def pipeline_parallel(
         for device, readings in gpu_temp_readings.items()
         if readings
     } or None
+    _cr_n_files = len(all_ids)
+    _cr_total_audio_hours = round(sum(s.get("total_audio_hours", 0.0) for s in worker_summaries if s), 4)
+    _cr_source_audio_bytes = sum(s.get("source_audio_bytes", 0) for s in worker_summaries if s)
+    _cr_total_words = sum(s.get("total_words", 0) for s in worker_summaries if s)
+    _cr_total_segments = sum(s.get("total_segments", 0) for s in worker_summaries if s)
+    _cr_source_mb = _cr_source_audio_bytes / 1_000_000
     combined_report = {
         "run_at": datetime.now(UTC).isoformat(),
-        "total_discovered": len(all_ids),
+        "total_discovered": _cr_n_files,
         "total_time_seconds": round(total_time, 2),
-        "total_audio_hours": round(sum(s.get("total_audio_hours", 0.0) for s in worker_summaries if s), 4),
-        "source_audio_bytes": sum(s.get("source_audio_bytes", 0) for s in worker_summaries if s),
-        "total_words": sum(s.get("total_words", 0) for s in worker_summaries if s),
-        "total_segments": sum(s.get("total_segments", 0) for s in worker_summaries if s),
+        "total_audio_hours": _cr_total_audio_hours,
+        "source_audio_bytes": _cr_source_audio_bytes,
+        "total_words": _cr_total_words,
+        "total_segments": _cr_total_segments,
+        "avg_time_per_file_seconds": round(total_time / _cr_n_files, 2) if _cr_n_files else None,
+        "avg_time_per_mb_seconds": round(total_time / _cr_source_mb, 4) if _cr_source_mb else None,
+        "processing_speed_ratio": round(_cr_total_audio_hours * 3600 / total_time, 3) if total_time else None,
+        "words_per_audio_hour": round(_cr_total_words / _cr_total_audio_hours, 1) if _cr_total_audio_hours else None,
         "gpu_temp_celsius": _gpu_temp_summaries,
         "workers": [
             {
