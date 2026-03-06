@@ -49,7 +49,7 @@ class DiarizationError(Exception):
 
 
 def _resolve_hf_token(hf_token: str | None) -> str:
-    """Return the HuggingFace token, loading from environment if not provided.
+    """Return the HuggingFace token, loading from the environment if not provided.
 
     Raises DiarizationError if no token is found.
     """
@@ -87,7 +87,7 @@ def load_pipeline(model: str, device: str, hf_token: str):
     try:
         import torch
 
-        # Pass the token via environment variable rather than as a kwarg.
+        # Pass the token via the environment variable rather than as a kwarg.
         # pyannote's from_pretrained() signature varies across versions, but
         # huggingface_hub always reads HF_TOKEN from the environment automatically.
         os.environ["HF_TOKEN"] = hf_token
@@ -126,6 +126,8 @@ def diarize(
         max_speakers: Optional upper bound on speaker count.
         hf_token: HuggingFace token. If None, reads from HF_TOKEN env var.
         model: Pyannote model ID.
+        _pipeline: Pre-loaded Pyannote pipeline instance. Skips model loading when
+            provided; intended for testing and pipeline reuse.
 
     Returns:
         DiarizationResult with full provenance of the diarization run.

@@ -60,7 +60,7 @@ def load_tflops_table() -> dict[str, float]:
         with open(_TFLOPS_TABLE_PATH, "rb") as f:
             data = tomllib.load(f)
         return {k: float(v) for k, v in data.get("tflops", {}).items()}
-    except Exception:
+    except (OSError, KeyError, ValueError, tomllib.TOMLDecodeError):
         return {}
 
 
@@ -123,13 +123,13 @@ def detect_gpu_order() -> tuple[str, ...]:
             tflops = lookup_tflops(name, tflops_table)
             if tflops is not None:
                 # Tier 1: known GPU — rank by TFLOPS.
-                return (1, tflops, 0, 0)
+                return 1, tflops, 0, 0
             # Tier 0: unknown GPU — rank by rounded VRAM then SM clock.
-            return (0, 0.0, round(mem_mib / 1024), sm_clock)
+            return 0, 0.0, round(mem_mib / 1024), sm_clock
 
         gpus.sort(key=_sort_key, reverse=True)
         return tuple(f"cuda:{g[0]}" for g in gpus)
-    except Exception:
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError, ValueError):
         return ("cuda:0",)
 
 

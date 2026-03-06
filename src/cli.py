@@ -7,6 +7,8 @@ import subprocess
 import sys
 import threading
 import time
+from collections import Counter
+from pathlib import Path
 
 # Force PCI bus order so CUDA device indices match nvidia-smi numbering.
 # Must be set before any CUDA context is created.
@@ -145,12 +147,66 @@ def _fmt_time(seconds: float) -> str:
     return f"{mins}m {secs}s"
 
 
+def _mkdir_demucs(demucs_path: Path, base_path: Path, demucs_on_ramdisk: bool) -> tuple[Path, bool]:
+    """Create demucs_path, prompting for local fallback on PermissionError.
+
+    Returns (final_demucs_path, final_demucs_on_ramdisk).
+    """
+    try:
+        demucs_path.mkdir(parents=True, exist_ok=True)
+        return demucs_path, demucs_on_ramdisk
+    except PermissionError:
+        console.print(
+            Panel(
+                "[bold yellow]/mnt/fast_scratch is not writable.[/bold yellow]\n\n"
+                "The RAM disk is mounted but the current user cannot write to it.\n"
+                "Remount with open permissions:\n\n"
+                "  [dim]sudo mount -o remount,mode=1777 /mnt/fast_scratch[/dim]\n\n"
+                f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]",
+                title="[yellow bold]RAM Disk Not Writable[/yellow bold]",
+                border_style="yellow",
+            )
+        )
+        if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
+            console.print("[dim]Aborted.[/dim]")
+            sys.exit(0)
+        demucs_path = base_path / "demucs"
+        demucs_path.mkdir(parents=True, exist_ok=True)
+        return demucs_path, False
+
+
+def _resolve_demucs_scratch(base_path: Path) -> tuple[Path, bool]:
+    """Resolve the Demucs scratch directory, prompting if /mnt/fast_scratch is unavailable.
+
+    Returns (demucs_path, demucs_on_ramdisk). Exits if the user declines local fallback.
+    """
+    fast_scratch = Path("/mnt/fast_scratch")
+    if fast_scratch.is_mount():
+        return fast_scratch / "demucs", True
+    console.print(
+        Panel(
+            "[bold yellow]/mnt/fast_scratch is not mounted.[/bold yellow]\n\n"
+            "The RAM disk is not available. Without it, Demucs scratch files will be\n"
+            "written to local storage, which is slower and increases SSD wear.\n\n"
+            f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]\n\n"
+            "To mount the RAM disk before running:\n"
+            "  [dim]sudo mount -t tmpfs -o size=32G,mode=1777 tmpfs /mnt/fast_scratch[/dim]",
+            title="[yellow bold]RAM Disk Not Available[/yellow bold]",
+            border_style="yellow",
+        )
+    )
+    if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
+        console.print("[dim]Aborted.[/dim]")
+        sys.exit(0)
+    return base_path / "demucs", False
+
+
 @click.group()
 def cli():
     """Audio Refinery — Audio processing pipeline."""
 
 
-@cli.command()
+@cli.command("separate")
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
 @click.option(
     "-o",
@@ -177,8 +233,6 @@ def cli():
 )
 def separate_cmd(input_file: str, output_dir: str, device: str, segment: int | None):
     """Run Demucs vocal separation on an audio file."""
-    from pathlib import Path
-
     input_path = Path(input_file)
     output_path = Path(output_dir)
 
@@ -231,7 +285,7 @@ def separate_cmd(input_file: str, output_dir: str, device: str, segment: int | N
     )
 
 
-@cli.command()
+@cli.command("diarize")
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
 @click.option(
     "-d",
@@ -275,8 +329,6 @@ def diarize_cmd(
     output_file: str | None,
 ):
     """Run Pyannote speaker diarization on an audio file."""
-    from pathlib import Path
-
     input_path = Path(input_file)
 
     speaker_hints = ""
@@ -355,7 +407,7 @@ def diarize_cmd(
         )
 
 
-@cli.command()
+@cli.command("transcribe")
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
 @click.option(
     "-d",
@@ -409,8 +461,6 @@ def transcribe_cmd(
     output_file: str | None,
 ):
     """Run WhisperX transcription on an audio file."""
-    from pathlib import Path
-
     input_path = Path(input_file)
     diarization_path = Path(diarization_file) if diarization_file else None
 
@@ -538,8 +588,6 @@ def sentiment_cmd(transcription_file: str, model: str, device: str, output_file:
     TRANSCRIPTION_FILE is also updated in place with sentiment fields merged
     into each segment, giving a single enriched output for downstream use.
     """
-    from pathlib import Path
-
     tx_path = Path(transcription_file)
 
     console.print(
@@ -824,8 +872,6 @@ def pipeline(
       /mnt/fast_scratch/demucs  — RAM disk (used automatically if mounted)
       <base>/demucs             — disk fallback (requires confirmation)
     """
-    from pathlib import Path
-
     from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
     from src.pipeline import discover_files
@@ -860,49 +906,9 @@ def pipeline(
         demucs_path = Path(demucs_dir)
         demucs_on_ramdisk = demucs_path.is_mount()
     else:
-        fast_scratch = Path("/mnt/fast_scratch")
-        if fast_scratch.is_mount():
-            demucs_path = fast_scratch / "demucs"
-            demucs_on_ramdisk = True
-        else:
-            console.print(
-                Panel(
-                    "[bold yellow]/mnt/fast_scratch is not mounted.[/bold yellow]\n\n"
-                    "The RAM disk is not available. Without it, Demucs scratch files will be\n"
-                    "written to local storage, which is slower and increases SSD wear.\n\n"
-                    f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]\n\n"
-                    "To mount the RAM disk before running:\n"
-                    "  [dim]sudo mount -t tmpfs -o size=32G,mode=1777 tmpfs /mnt/fast_scratch[/dim]",
-                    title="[yellow bold]RAM Disk Not Available[/yellow bold]",
-                    border_style="yellow",
-                )
-            )
-            if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
-                console.print("[dim]Aborted.[/dim]")
-                sys.exit(0)
-            demucs_path = base_path / "demucs"
-            demucs_on_ramdisk = False
+        demucs_path, demucs_on_ramdisk = _resolve_demucs_scratch(base_path)
 
-    try:
-        demucs_path.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
-        console.print(
-            Panel(
-                "[bold yellow]/mnt/fast_scratch is not writable.[/bold yellow]\n\n"
-                "The RAM disk is mounted but the current user cannot write to it.\n"
-                "Remount with open permissions:\n\n"
-                "  [dim]sudo mount -o remount,mode=1777 /mnt/fast_scratch[/dim]\n\n"
-                f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]",
-                title="[yellow bold]RAM Disk Not Writable[/yellow bold]",
-                border_style="yellow",
-            )
-        )
-        if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
-            console.print("[dim]Aborted.[/dim]")
-            sys.exit(0)
-        demucs_path = base_path / "demucs"
-        demucs_on_ramdisk = False
-        demucs_path.mkdir(parents=True, exist_ok=True)
+    demucs_path, demucs_on_ramdisk = _mkdir_demucs(demucs_path, base_path, demucs_on_ramdisk)
     for path in [diar_path, tx_path, summary_dir]:
         path.mkdir(parents=True, exist_ok=True)
     if sentiment:
@@ -1010,9 +1016,9 @@ def pipeline(
                 if _progress_file is not None:
                     _progress_file.write_text(json.dumps({"done": i, "total": n, "current": "", "stage": "done"}))
                 return
-            colour = _stage_colours.get(stage, "cyan")
+            stage_colour = _stage_colours.get(stage, "cyan")
             label = _stage_labels.get(stage, stage)
-            # Update temperature reading at most once every 5 s.
+            # Update the temperature reading at most once every 5 s.
             now = time.monotonic()
             if device != "cpu" and now - _temp_state["ts"] >= 5.0:
                 _t = query_gpu_temperature(_cuda_idx)
@@ -1021,7 +1027,9 @@ def pipeline(
                 if _t is not None:
                     _temp_state["readings"].append(_t)
             temp_str = f" · {_fmt_temp(_temp_state['value'], temp_limit)}" if device != "cpu" else ""
-            progress.update(task, completed=i, description=f"[{colour}]{label}[/{colour}] · {content_id}{temp_str}")
+            progress.update(
+                task, completed=i, description=f"[{stage_colour}]{label}[/{stage_colour}] · {content_id}{temp_str}"
+            )
             # Plain-text fallback when stdout is redirected to a log file (no TTY).
             if not sys.stdout.isatty():
                 click.echo(f"[{time.strftime('%H:%M:%S')}] {label} {i}/{n} · {content_id}")
@@ -1249,6 +1257,35 @@ def pipeline(
         completed=completed,
         failures=len(all_failures),
         elapsed_seconds=total_time,
+        stages={
+            "separation": {
+                "processed": sep_result.n_succeeded,
+                "skipped": sep_result.n_skipped,
+                "failed": sep_result.n_failed,
+            },
+            "diarization": {
+                "processed": diar_result.n_succeeded,
+                "skipped": diar_result.n_skipped,
+                "failed": diar_result.n_failed,
+            },
+            "transcription": {
+                "processed": tx_result.n_succeeded,
+                "skipped": tx_result.n_skipped,
+                "failed": tx_result.n_failed,
+            },
+            **(
+                {
+                    "sentiment": {
+                        "processed": sent_result.n_succeeded,
+                        "skipped": sent_result.n_skipped,
+                        "failed": sent_result.n_failed,
+                    }
+                }
+                if sentiment
+                else {}
+            ),
+        },
+        avg_per_file_seconds=pipeline_avg,
     )
 
     if all_failures:
@@ -1393,7 +1430,6 @@ def pipeline_parallel(
       <base>/summary/       — per-worker summaries + combined_report.json
     """
     from datetime import UTC, datetime
-    from pathlib import Path
 
     from src.pipeline import discover_files, partition_ids
 
@@ -1423,53 +1459,13 @@ def pipeline_parallel(
     _warn_if_gpu_busy(list(devices))
 
     # ── Resolve Demucs scratch (interactive if needed; performed once here) ──
-    fast_scratch = Path("/mnt/fast_scratch")
-    if fast_scratch.is_mount():
-        demucs_path = fast_scratch / "demucs"
-        demucs_on_ramdisk = True
-    else:
-        console.print(
-            Panel(
-                "[bold yellow]/mnt/fast_scratch is not mounted.[/bold yellow]\n\n"
-                "The RAM disk is not available. Without it, Demucs scratch files will be\n"
-                "written to local storage, which is slower and increases SSD wear.\n\n"
-                f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]\n\n"
-                "To mount the RAM disk before running:\n"
-                "  [dim]sudo mount -t tmpfs -o size=32G,mode=1777 tmpfs /mnt/fast_scratch[/dim]",
-                title="[yellow bold]RAM Disk Not Available[/yellow bold]",
-                border_style="yellow",
-            )
-        )
-        if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
-            console.print("[dim]Aborted.[/dim]")
-            sys.exit(0)
-        demucs_path = base_path / "demucs"
-        demucs_on_ramdisk = False
+    demucs_path, demucs_on_ramdisk = _resolve_demucs_scratch(base_path)
 
     # ── Create working directories ──────────────────────────────────────────
     manifests_dir = base_path / "manifests"
     logs_dir = base_path / "logs"
     summary_dir = base_path / "summary"
-    try:
-        demucs_path.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
-        console.print(
-            Panel(
-                "[bold yellow]/mnt/fast_scratch is not writable.[/bold yellow]\n\n"
-                "The RAM disk is mounted but the current user cannot write to it.\n"
-                "Remount with open permissions:\n\n"
-                "  [dim]sudo mount -o remount,mode=1777 /mnt/fast_scratch[/dim]\n\n"
-                f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]",
-                title="[yellow bold]RAM Disk Not Writable[/yellow bold]",
-                border_style="yellow",
-            )
-        )
-        if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
-            console.print("[dim]Aborted.[/dim]")
-            sys.exit(0)
-        demucs_path = base_path / "demucs"
-        demucs_on_ramdisk = False
-        demucs_path.mkdir(parents=True, exist_ok=True)
+    demucs_path, demucs_on_ramdisk = _mkdir_demucs(demucs_path, base_path, demucs_on_ramdisk)
     for path in [manifests_dir, logs_dir, summary_dir]:
         path.mkdir(parents=True, exist_ok=True)
 
@@ -1534,14 +1530,16 @@ def pipeline_parallel(
     # ── Build worker commands ───────────────────────────────────────────────
     refinery_cmd = sys.argv[0]
 
-    def _build_worker_cmd(device: str, manifest_path: Path, summary_path: Path, progress_path: Path) -> list[str]:
+    def _build_worker_cmd(
+        worker_device: str, manifest_path: Path, summary_path: Path, progress_path: Path
+    ) -> list[str]:
         cmd = [
             refinery_cmd,
             "pipeline",
             "--base-dir",
             str(base_path),
             "--device",
-            device,
+            worker_device,
             "--demucs-dir",
             str(demucs_path),
             "--manifest",
@@ -1579,9 +1577,9 @@ def pipeline_parallel(
     scratch_suffix = "(RAM disk)" if demucs_on_ramdisk else "(disk)"
     tflops_table = load_tflops_table()
 
-    def _gpu_stat_line(device: str) -> str:
-        idx = int(device.split(":")[1]) if ":" in device else 0
-        info = query_gpu_info(idx)
+    def _gpu_stat_line(gpu_device: str) -> str:
+        gpu_idx = int(gpu_device.split(":")[1]) if ":" in gpu_device else 0
+        info = query_gpu_info(gpu_idx)
         if info is None:
             return "[dim]GPU info unavailable[/dim]"
         vram_gb = round(info.vram_mib / 1024)
@@ -1621,10 +1619,10 @@ def pipeline_parallel(
     gpu_temps: dict[str, int | None] = {w["device"]: None for w in workers}
     gpu_temp_readings: dict[str, list[int]] = {w["device"]: [] for w in workers}
 
-    def _read_progress(path: Path) -> dict:
+    def _read_progress(fpath: Path) -> dict:
         try:
-            return json.loads(path.read_text())
-        except Exception:
+            return json.loads(fpath.read_text())
+        except (OSError, json.JSONDecodeError):
             return {"done": 0, "total": "?", "current": "—", "stage": "starting"}
 
     def _worker_status_table() -> Table:
@@ -1642,18 +1640,18 @@ def pipeline_parallel(
         tbl.add_column("Stage", width=10)
         tbl.add_column("File")
         tbl.add_column("Progress", justify="right", width=10)
-        for w in workers:
-            p = _read_progress(w["progress"])
+        for wdict in workers:
+            p = _read_progress(wdict["progress"])
             done, total_w = p.get("done", 0), p.get("total", "?")
             stage_val = p.get("stage", "—")
             if stage_val == "done":
-                n_failures = p.get("failures", None)
-                stage_display = "[yellow]Done[/yellow]" if n_failures else "[green]Done[/green]"
+                worker_failures = p.get("failures", None)
+                stage_display = "[yellow]Done[/yellow]" if worker_failures else "[green]Done[/green]"
                 file_display = ""
             else:
                 stage_display, file_display = stage_val, p.get("current", "—")
-            temp_display = _fmt_temp(gpu_temps.get(w["device"]), temp_limit)
-            tbl.add_row(w["label"], w["device"], temp_display, stage_display, file_display, f"{done}/{total_w}")
+            temp_display = _fmt_temp(gpu_temps.get(wdict["device"]), temp_limit)
+            tbl.add_row(wdict["label"], wdict["device"], temp_display, stage_display, file_display, f"{done}/{total_w}")
         return tbl
 
     try:
@@ -1699,18 +1697,13 @@ def pipeline_parallel(
 
     total_time = time.monotonic() - t0
 
-    # ── Report exit status ──────────────────────────────────────────────────
-    for w in workers:
-        ok = w["rc"] == 0
-        status = "[green]OK[/green]" if ok else f"[red]FAILED (exit {w['rc']})[/red]"
-        console.print(f"Worker {w['label']} ({w['device']}): {status}")
     console.print(f"[dim]Total wall-clock time: {_fmt_time(total_time)}[/dim]\n")
 
     # ── Aggregate summaries ─────────────────────────────────────────────────
-    def _load_summary(path: Path) -> dict | None:
+    def _load_summary(fpath: Path) -> dict | None:
         try:
-            return json.loads(path.read_text())
-        except Exception:
+            return json.loads(fpath.read_text())
+        except (OSError, json.JSONDecodeError):
             return None
 
     all_combined_failures: list[dict] = []
@@ -1722,6 +1715,19 @@ def pipeline_parallel(
             for f in summary.get("failures", []):
                 all_combined_failures.append({"worker": w["label"], "device": w["device"], **f})
 
+    # ── Report exit status ──────────────────────────────────────────────────
+    for i, w in enumerate(workers):
+        summary = worker_summaries[i]
+        if w["rc"] == 0:
+            status = "[green]OK[/green]"
+        elif summary is not None:
+            n_failures = len(summary.get("failures", []))
+            label = "failure" if n_failures == 1 else "failures"
+            status = f"[yellow]Completed ({n_failures} file {label})[/yellow]"
+        else:
+            status = f"[red]FAILED (exit {w['rc']})[/red]"
+        console.print(f"Worker {w['label']} ({w['device']}): {status}")
+
     _notif_processed = 0
     _notif_failures = 0
 
@@ -1732,11 +1738,11 @@ def pipeline_parallel(
         combined.add_column("Skipped", justify="right")
         combined.add_column("Failed", justify="right")
 
-        def _agg(key: str, sub: str) -> int:
+        def _agg(agg_key: str, sub: str) -> int:
             agg_total = 0
             for s in worker_summaries:
                 if s:
-                    agg_total += s.get("stages", {}).get(key, {}).get(sub, 0)
+                    agg_total += s.get("stages", {}).get(agg_key, {}).get(sub, 0)
             return agg_total
 
         stage_rows = [
@@ -1776,6 +1782,10 @@ def pipeline_parallel(
 
     # ── Combined failure report (printed) ──────────────────────────────────
     if all_combined_failures:
+        failure_counts: Counter = Counter()
+        for f in all_combined_failures:
+            key = (f.get("worker", ""), f.get("device", ""), f.get("stage", ""), f.get("error", ""))
+            failure_counts[key] += 1
         fail_table = Table(
             title=f"Combined Failure Report ({len(all_combined_failures)} failures)",
             border_style="red",
@@ -1783,16 +1793,10 @@ def pipeline_parallel(
         fail_table.add_column("Worker", style="bold")
         fail_table.add_column("Device")
         fail_table.add_column("Stage")
-        fail_table.add_column("Content ID")
+        fail_table.add_column("Count", justify="right")
         fail_table.add_column("Error")
-        for f in all_combined_failures:
-            fail_table.add_row(
-                f.get("worker", ""),
-                f.get("device", ""),
-                f.get("stage", ""),
-                f.get("content_id", ""),
-                f.get("error", ""),
-            )
+        for (worker, device, stage, error), count in sorted(failure_counts.items()):
+            fail_table.add_row(worker, device, stage, str(count), error)
         console.print(fail_table)
 
     # ── Write combined_report.json (always) ────────────────────────────────
@@ -1805,14 +1809,24 @@ def pipeline_parallel(
         for device, readings in gpu_temp_readings.items()
         if readings
     } or None
+    _cr_n_files = len(all_ids)
+    _cr_total_audio_hours = round(sum(s.get("total_audio_hours", 0.0) for s in worker_summaries if s), 4)
+    _cr_source_audio_bytes = sum(s.get("source_audio_bytes", 0) for s in worker_summaries if s)
+    _cr_total_words = sum(s.get("total_words", 0) for s in worker_summaries if s)
+    _cr_total_segments = sum(s.get("total_segments", 0) for s in worker_summaries if s)
+    _cr_source_mb = _cr_source_audio_bytes / 1_000_000
     combined_report = {
         "run_at": datetime.now(UTC).isoformat(),
-        "total_discovered": len(all_ids),
+        "total_discovered": _cr_n_files,
         "total_time_seconds": round(total_time, 2),
-        "total_audio_hours": round(sum(s.get("total_audio_hours", 0.0) for s in worker_summaries if s), 4),
-        "source_audio_bytes": sum(s.get("source_audio_bytes", 0) for s in worker_summaries if s),
-        "total_words": sum(s.get("total_words", 0) for s in worker_summaries if s),
-        "total_segments": sum(s.get("total_segments", 0) for s in worker_summaries if s),
+        "total_audio_hours": _cr_total_audio_hours,
+        "source_audio_bytes": _cr_source_audio_bytes,
+        "total_words": _cr_total_words,
+        "total_segments": _cr_total_segments,
+        "avg_time_per_file_seconds": round(total_time / _cr_n_files, 2) if _cr_n_files else None,
+        "avg_time_per_mb_seconds": round(total_time / _cr_source_mb, 4) if _cr_source_mb else None,
+        "processing_speed_ratio": round(_cr_total_audio_hours * 3600 / total_time, 3) if total_time else None,
+        "words_per_audio_hour": round(_cr_total_words / _cr_total_audio_hours, 1) if _cr_total_audio_hours else None,
         "gpu_temp_celsius": _gpu_temp_summaries,
         "workers": [
             {
@@ -1829,21 +1843,32 @@ def pipeline_parallel(
     combined_report_path.write_text(json.dumps(combined_report, indent=2))
     console.print(f"[dim]Combined report written to: {combined_report_path}[/dim]")
 
-    worker_statuses = [(w["label"], w["device"], w["rc"] == 0) for w in workers]
+    worker_statuses = []
+    for i, w in enumerate(workers):
+        ws = worker_summaries[i]
+        n_fail = len(ws.get("failures", [])) if ws is not None else 0
+        worker_statuses.append((w["label"], w["device"], w["rc"], n_fail))
+    _parallel_stages: dict[str, dict[str, int]] | None = None
+    if any(s for s in worker_summaries):
+        _parallel_stages = {
+            stage_key: {
+                "processed": _agg(stage_key, "processed"),
+                "skipped": _agg(stage_key, "skipped"),
+                "failed": _agg(stage_key, "failed"),
+            }
+            for stage_key in (["separation", "diarization", "transcription"] + (["sentiment"] if sentiment else []))
+        }
     notify_pipeline_parallel_complete(
         worker_statuses=worker_statuses,
         total_discovered=len(all_ids),
         total_processed=_notif_processed,
         failures=_notif_failures,
         elapsed_seconds=total_time,
+        stages=_parallel_stages,
+        avg_per_file_seconds=combined_avg if _notif_processed else 0.0,
     )
 
     if not all(w["rc"] == 0 for w in workers):
         failed_logs = "\n".join(f"  {w['log']}" for w in workers)
         console.print(f"[dim]Worker logs retained for inspection:[/dim]\n{failed_logs}")
         sys.exit(1)
-
-
-cli.add_command(separate_cmd, name="separate")
-cli.add_command(diarize_cmd, name="diarize")
-cli.add_command(transcribe_cmd, name="transcribe")

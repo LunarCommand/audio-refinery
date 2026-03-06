@@ -18,11 +18,11 @@ This guide covers setting up audio-refinery for development, testing, and contri
 
 The three GPU-resident models have the following approximate VRAM footprints:
 
-| Model | Stage | Peak VRAM |
-|---|---|:---:|
-| Demucs `htdemucs` | Vocal separation | ~4 GB |
-| Pyannote `speaker-diarization-3.1` | Diarization | ~1 GB |
-| WhisperX `large-v3` | Transcription | ~10 GB |
+| Model                              | Stage            | Peak VRAM |
+|------------------------------------|------------------|:---------:|
+| Demucs `htdemucs`                  | Vocal separation |   ~4 GB   |
+| Pyannote `speaker-diarization-3.1` | Diarization      |   ~1 GB   |
+| WhisperX `large-v3`                | Transcription    |  ~10 GB   |
 
 A **24 GB GPU** (RTX 3090, 3090 Ti, 4090, A5000, etc.) holds all three models simultaneously
 with room for a comfortable batch size (16–32). This is the recommended configuration for
@@ -259,12 +259,12 @@ Hooks run:
 
 Each stage is a standalone module with a pure-function API:
 
-| Module | Function | Output Model |
-|--------|----------|--------------|
-| `separator.py` | `separate()` | `SeparationResult` |
-| `diarizer.py` | `diarize()` | `DiarizationResult` |
-| `transcriber.py` | `transcribe()` | `TranscriptionResult` |
-| `sentiment_analyzer.py` | `analyze_sentiment()` | `SentimentResult` |
+| Module                  | Function              | Output Model          |
+|-------------------------|-----------------------|-----------------------|
+| `separator.py`          | `separate()`          | `SeparationResult`    |
+| `diarizer.py`           | `diarize()`           | `DiarizationResult`   |
+| `transcriber.py`        | `transcribe()`        | `TranscriptionResult` |
+| `sentiment_analyzer.py` | `analyze_sentiment()` | `SentimentResult`     |
 
 ### Data Flow
 
@@ -371,15 +371,15 @@ Before creating a release:
 
 After release:
 
-- [ ] GitHub Release page shows correct version and artifacts
+- [ ] GitHub Release page shows the correct version and artifacts
 - [ ] Release notes are accurate
 
 ### Quick Reference
 
 ```bash
 # Complete release workflow
-git checkout main && git pull
-git checkout -b release/vX.Y.Z
+git switch main && git pull
+git switch -c release/vX.Y.Z
 # Update pyproject.toml version and CHANGELOG.md
 make all-checks
 git add pyproject.toml CHANGELOG.md
