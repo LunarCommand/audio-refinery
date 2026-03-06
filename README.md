@@ -607,6 +607,29 @@ Options:
   --help                             Show this message and exit.
 ```
 
+### Combined report fields
+
+`combined_report.json` is always written after all workers finish. It contains aggregate metrics across all workers:
+
+| Field | Type | Description |
+|---|---|---|
+| `run_at` | string | ISO 8601 timestamp of run start (UTC) |
+| `total_discovered` | int | Total WAV files found in `extracted/` |
+| `total_time_seconds` | float | Wall-clock seconds from first worker start to last finish |
+| `total_audio_hours` | float | Total audio duration processed across all workers |
+| `source_audio_bytes` | int | Combined size of all input WAV files |
+| `total_words` | int | Total words transcribed across all files |
+| `total_segments` | int | Total transcript segments across all files |
+| `avg_time_per_file_seconds` | float | `total_time / total_discovered` — average wall-clock cost per file |
+| `avg_time_per_mb_seconds` | float | `total_time / source_MB` — processing seconds per MB of source audio |
+| `processing_speed_ratio` | float | `audio_seconds / wall_seconds` — real-time factor (e.g. `3.7` means the pipeline processed audio 3.7× faster than its playback duration) |
+| `words_per_audio_hour` | float | Transcription density — useful for detecting sparse/silent audio or diarization misses |
+| `gpu_temp_celsius` | object | Per-device temperature summary: `peak_celsius`, `avg_celsius`, `sample_count` |
+| `workers` | array | Per-worker label, device, exit code, and individual summary |
+| `combined_failures` | array | Aggregated failure records from all workers |
+
+`null` is written for derived metrics when the divisor is zero (e.g. `avg_time_per_file_seconds` is `null` if no files were discovered).
+
 ### Power limit / sudoers
 
 `--power-limit` invokes `sudo nvidia-smi -pl <watts>`. To allow this without a password prompt:
