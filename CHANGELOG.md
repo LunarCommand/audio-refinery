@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-06
+
+### Added
+
+- `combined_report.json` now includes four derived metrics: `avg_time_per_file_seconds`, `avg_time_per_mb_seconds`, `processing_speed_ratio` (real-time factor), and `words_per_audio_hour` (transcription density)
+- Slack notifications now include detailed per-stage stats (processed / skipped / failed counts) and average processing time per file
+- `make test-slack` Makefile target for validating Slack webhook integration
+- Dockerfile and `.dockerignore` for containerized deployment
+- Sentiment output directory (`<base>/sentiment/`) support in batch pipeline
+
+### Changed
+
+- Centralized Demucs scratch directory resolution in CLI — RAM disk detection and fallback confirmation now happen in one place
+- Worker status reporting and failure aggregation in `pipeline-parallel` refactored for improved accuracy
+- `python-dotenv` import in Slack notifier is now conditional — avoids import-time failure when the package is absent
+- DEPLOYMENT.md expanded: HuggingFace token setup, NVIDIA driver requirements, cloud instance guidelines, and Docker usage
+- Combined report fields documented in README under the Parallel Pipeline section
+
+### Fixed
+
+- Narrowed exception handling in `gpu_utils.py`, `transcriber.py`, and `notifier.py` to avoid masking unexpected errors
+- Typo in `SeparationError` docstring
+
 ## [0.1.0] - 2026-03-01
 
 ### Added
@@ -35,5 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transformers` capped at `<4.40.0` — versions 4.40+ use `torch.utils._pytree.register_pytree_node`, an API introduced in PyTorch 2.2, which breaks with the pinned PyTorch 2.1.2
 - `make dev-setup` now reinstalls CUDA torch wheels (`torch==2.1.2+cu121`, `torchaudio==2.1.2+cu121`) as its final step — `uv sync` resolves torch from PyPI and installs the CPU-only build, silently breaking GPU inference
 
-[Unreleased]: https://github.com/LunarCommand/audio-refinery/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/LunarCommand/audio-refinery/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LunarCommand/audio-refinery/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/LunarCommand/audio-refinery/releases/tag/v0.1.0
