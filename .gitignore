@@ -1,5 +1,6 @@
 assets/
 .claude/
+_reqs/
 
 # Python
 .venv/
