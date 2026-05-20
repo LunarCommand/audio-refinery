@@ -8,8 +8,10 @@ to actually consume a job; the rest just exercise the HTTP envelope.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.service.app import create_app
@@ -312,6 +314,74 @@ def test_get_job_requires_auth():
 # ---------------------------------------------------------------------------
 # Lifespan: worker / sweeper starts when handles provided
 # ---------------------------------------------------------------------------
+
+
+def test_resolve_scratch_location_uses_config_when_set(tmp_path: Path):
+    from src.service.app import _resolve_scratch_location
+
+    config = ServiceConfig(scratch_dir=tmp_path / "rfj_scratch")
+    resolved, _fstype = _resolve_scratch_location(config)
+    assert resolved == tmp_path / "rfj_scratch"
+
+
+def test_resolve_scratch_location_falls_back_to_tempfile_default():
+    import tempfile
+
+    from src.service.app import _resolve_scratch_location
+
+    config = ServiceConfig()  # scratch_dir defaults to None
+    resolved, _fstype = _resolve_scratch_location(config)
+    assert resolved == Path(tempfile.gettempdir())
+
+
+def test_detect_fstype_reads_proc_mounts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """On Linux, /proc/mounts is the canonical filesystem-type source. We can't
+    actually mount tmpfs in a test, but we can prove the parser finds the
+    deepest matching mountpoint."""
+    from src.service.app import _detect_fstype
+
+    fake_mounts = (
+        f"tmpfs / tmpfs rw 0 0\noverlay {tmp_path} overlay rw 0 0\ntmpfs {tmp_path / 'scratch'} tmpfs rw,size=4G 0 0\n"
+    )
+    fake_proc = tmp_path / "fake_proc_mounts"
+    fake_proc.write_text(fake_mounts)
+
+    # Patch the open() target by replacing the helper's source.
+    real_open = open
+
+    def fake_open(path, *args, **kwargs):
+        if path == "/proc/mounts":
+            return real_open(fake_proc, *args, **kwargs)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    # Deepest match for scratch should be the tmpfs entry.
+    assert _detect_fstype(scratch) == "tmpfs"
+    # A path inside scratch also resolves to tmpfs.
+    inner = scratch / "subdir"
+    inner.mkdir()
+    assert _detect_fstype(inner) == "tmpfs"
+    # A path outside scratch falls back to the overlay entry.
+    other = tmp_path / "other"
+    other.mkdir()
+    assert _detect_fstype(other) == "overlay"
+
+
+def test_detect_fstype_returns_none_when_proc_mounts_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from src.service.app import _detect_fstype
+
+    real_open = open
+
+    def fake_open(path, *args, **kwargs):
+        if path == "/proc/mounts":
+            raise OSError("not Linux")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    assert _detect_fstype(tmp_path) is None
 
 
 def test_lifespan_starts_worker_and_sweeper_when_handles_supplied():

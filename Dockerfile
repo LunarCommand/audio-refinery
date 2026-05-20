@@ -46,6 +46,17 @@ RUN uv pip install --system \
 RUN uv pip install --system torch==2.1.2+cu121 torchaudio==2.1.2+cu121 \
     --extra-index-url https://download.pytorch.org/whl/cu121
 
+# Per-job Demucs scratch lives here. The directory is declared as a VOLUME
+# so operators can bind a tmpfs mount (recommended on RAM-rich hosts for the
+# RAM-disk benefit Demucs throughput likes) or a fast disk on RAM-tight VMs.
+# The env var is honored by `tempfile.TemporaryDirectory(dir=...)` in the
+# worker. Unset REFINERY_SCRATCH_DIR to fall back to the system /tmp.
+USER root
+RUN mkdir -p /scratch && chown refinery:refinery /scratch
+USER refinery
+ENV REFINERY_SCRATCH_DIR=/scratch
+VOLUME ["/scratch"]
+
 # Service mode binds REFINERY_PORT (default 8000) on all interfaces.
 EXPOSE 8000
 

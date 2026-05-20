@@ -276,6 +276,55 @@ def create_app(
 
 
 # ---------------------------------------------------------------------------
+# Scratch-location diagnostics
+# ---------------------------------------------------------------------------
+
+
+def _resolve_scratch_location(config: ServiceConfig) -> tuple[Path, str | None]:
+    """Return the resolved scratch directory plus its filesystem type (or None).
+
+    Resolution: ``config.scratch_dir`` if set, otherwise the tempfile module's
+    default (``TMPDIR`` env or ``/tmp``). Filesystem type is detected on Linux
+    by reading /proc/mounts and matching the deepest mount-point prefix; on
+    other platforms returns None.
+    """
+    import tempfile as _tempfile
+
+    path = config.scratch_dir if config.scratch_dir is not None else Path(_tempfile.gettempdir())
+    return path, _detect_fstype(path)
+
+
+def _detect_fstype(path: Path) -> str | None:
+    """Detect the filesystem type of ``path`` on Linux. Returns None on
+    non-Linux or when /proc/mounts is unreadable."""
+    try:
+        with open("/proc/mounts") as f:
+            entries = [line.split() for line in f if line.strip()]
+    except OSError:
+        return None
+
+    try:
+        target = path.resolve()
+    except OSError:
+        return None
+
+    best: tuple[Path, str] | None = None
+    for parts in entries:
+        if len(parts) < 3:
+            continue
+        try:
+            mountpoint = Path(parts[1]).resolve()
+        except OSError:
+            continue
+        fstype = parts[2]
+        is_match = mountpoint == target or mountpoint in target.parents
+        is_deeper = best is None or len(str(mountpoint)) > len(str(best[0]))
+        if is_match and is_deeper:
+            best = (mountpoint, fstype)
+    return best[1] if best is not None else None
+
+
+# ---------------------------------------------------------------------------
 # Background-thread orchestration helpers
 # ---------------------------------------------------------------------------
 
@@ -315,7 +364,25 @@ def _start_background_workers(
 
     app.state.thermal_stop = start_thermal_guard_from_config(config, default_thermal_trip)
 
-    logger.info("service.ready", device=config.device, whisper_model=config.whisper_model)
+    scratch_path, scratch_fstype = _resolve_scratch_location(config)
+    logger.info(
+        "service.ready",
+        device=config.device,
+        whisper_model=config.whisper_model,
+        scratch_dir=str(scratch_path),
+        scratch_fstype=scratch_fstype,
+        scratch_is_tmpfs=(scratch_fstype == "tmpfs"),
+    )
+    if scratch_fstype is not None and scratch_fstype != "tmpfs":
+        logger.warning(
+            "scratch.not_tmpfs",
+            scratch_dir=str(scratch_path),
+            scratch_fstype=scratch_fstype,
+            hint=(
+                "Demucs scratch lives on a disk-backed filesystem. For better batch throughput, mount "
+                "tmpfs at the scratch path and set REFINERY_SCRATCH_DIR to point there."
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +421,7 @@ def _config_from_env() -> ServiceConfig:
     every recognized env var.
     """
     intermediate = os.getenv("REFINERY_INTERMEDIATE_DIR")
+    scratch = os.getenv("REFINERY_SCRATCH_DIR")
     return ServiceConfig(
         device=os.getenv("REFINERY_DEVICE", ServiceConfig.__dataclass_fields__["device"].default),  # type: ignore[arg-type]
         whisper_model=os.getenv(
@@ -371,6 +439,7 @@ def _config_from_env() -> ServiceConfig:
         sentiment_enabled=os.getenv("REFINERY_SENTIMENT_ENABLED", "false").lower() == "true",
         hf_token=os.getenv("HF_TOKEN", ""),
         intermediate_dir=Path(intermediate) if intermediate else None,
+        scratch_dir=Path(scratch) if scratch else None,
         max_queue_size=int(os.getenv("REFINERY_MAX_QUEUE_SIZE", "100")),
         max_batch_size=int(os.getenv("REFINERY_MAX_BATCH_SIZE", "25")),
         job_retention_seconds=int(os.getenv("REFINERY_JOB_RETENTION_SECONDS", "3600")),

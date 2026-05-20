@@ -37,6 +37,13 @@ class ServiceConfig:
         ``intermediate_dir`` — when set (from ``REFINERY_INTERMEDIATE_DIR``),
             the worker copies per-stage JSONs to ``<dir>/<job_id>/`` after each
             successful job. Debugging-only; off by default.
+        ``scratch_dir`` — base directory for per-job temp dirs that hold the
+            input download + Demucs stems + per-stage JSONs. Set from
+            ``REFINERY_SCRATCH_DIR``. When unset, the worker uses Python's
+            tempfile default (TMPDIR env or /tmp). Recommended: mount a tmpfs
+            volume here for the RAM-disk benefit Demucs benefits from. Each
+            job uses its own subdirectory, cleaned up automatically when the
+            job settles; peak transient space is one job's worth (~3–5 GB).
         ``max_queue_size`` — JobQueue cap from ``REFINERY_MAX_QUEUE_SIZE``.
             Default 100. Over-limit POSTs return 429.
         ``max_batch_size`` — server-side cap on jobs per POST /transcribe call
@@ -65,6 +72,7 @@ class ServiceConfig:
     sentiment_enabled: bool = False
     hf_token: str = ""
     intermediate_dir: Path | None = None
+    scratch_dir: Path | None = None
     max_queue_size: int = 100
     max_batch_size: int = 25
     job_retention_seconds: int = 3600

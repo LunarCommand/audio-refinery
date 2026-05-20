@@ -565,6 +565,42 @@ def test_process_job_uncaught_exception_marks_failed(
     notify.assert_called_once()
 
 
+def test_process_job_creates_per_job_temp_under_scratch_dir_when_configured(
+    handles: PipelineHandles, tmp_path: Path
+) -> None:
+    """When scratch_dir is set, each job's temp dir is created under that path
+    so operators can bind tmpfs / fast disk via REFINERY_SCRATCH_DIR."""
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    config = ServiceConfig(device="cpu", scratch_dir=scratch_root)
+    registries = Registries()
+
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"\x00" * 16)
+    job, _ = _register_job_and_batch(registries, input_uri=f"file://{audio}")
+    content_id = job.job_id.removeprefix("rfj_")
+
+    observed: dict[str, Path] = {}
+
+    def recording_run_pipeline(**kwargs):
+        observed["source_dir"] = kwargs["source_dir"]
+        return _build_pipeline_side_effect(content_id)(**kwargs)
+
+    with (
+        patch("src.service.jobs.run_pipeline", new=recording_run_pipeline),
+        patch("src.service.jobs.upload"),
+        patch("src.service.jobs.notify_job_failed"),
+    ):
+        process_job(job, handles, config, registries)
+
+    assert observed["source_dir"].is_relative_to(scratch_root), (
+        f"per-job temp {observed['source_dir']} should live under scratch_dir {scratch_root}"
+    )
+    fetched = registries.jobs.get(job.job_id)
+    assert fetched is not None
+    assert fetched.status == "completed"
+
+
 def test_process_job_persists_intermediates_when_configured(handles: PipelineHandles, tmp_path: Path) -> None:
     intermediate_root = tmp_path / "intermediates"
     config = ServiceConfig(device="cpu", intermediate_dir=intermediate_root)

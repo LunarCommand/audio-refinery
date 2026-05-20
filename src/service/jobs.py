@@ -392,7 +392,8 @@ def process_job(
 
     content_id = _content_id_from_job_id(job.job_id)
 
-    with tempfile.TemporaryDirectory(prefix="rfj_") as tmpdir_name:
+    scratch_root = str(config.scratch_dir) if config.scratch_dir is not None else None
+    with tempfile.TemporaryDirectory(prefix="rfj_", dir=scratch_root) as tmpdir_name:
         tmp = Path(tmpdir_name)
         source_dir = tmp / "source"
         source_dir.mkdir()
