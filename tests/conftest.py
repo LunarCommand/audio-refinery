@@ -25,6 +25,19 @@ def _gpu_free():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _no_slack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Suppress Slack notifications during tests.
+
+    ``src.notifier._send`` calls ``load_dotenv()`` on every invocation, which
+    would pick up a developer's real ``SLACK_WEBHOOK_URL`` from the project
+    ``.env`` and POST live messages whenever pipeline code paths hit a
+    notifier call. Tests must never trigger real external side effects.
+    """
+    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
+    monkeypatch.setattr("src.notifier._load_dotenv", None)
+
+
 @pytest.fixture
 def tmp_output_dir(tmp_path: Path) -> Path:
     """Temporary output directory for Demucs results."""
