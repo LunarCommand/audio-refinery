@@ -9,10 +9,14 @@ from __future__ import annotations
 import queue
 import re
 import threading
+import time
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.pipeline import FileOutcome, PipelineResult, StageResult
 from src.service.jobs import (
     Batch,
     BatchRegistry,
@@ -20,9 +24,13 @@ from src.service.jobs import (
     JobQueue,
     JobRegistry,
     Registries,
+    Worker,
+    finalize_batch,
     make_batch_id,
     make_job_id,
+    process_job,
 )
+from src.service.lifecycle import PipelineHandles, ServiceConfig
 
 # ---------------------------------------------------------------------------
 # ID helpers
@@ -267,3 +275,470 @@ def test_registries_bundle_provides_fresh_instances():
     assert isinstance(r.jobs, JobRegistry)
     assert isinstance(r.batches, BatchRegistry)
     assert isinstance(r.queue, JobQueue)
+
+
+# ---------------------------------------------------------------------------
+# Worker behavior (process_job, finalize_batch, Worker class)
+# ---------------------------------------------------------------------------
+
+
+def _stage_result(content_id: str, success: bool = True, error: str | None = None) -> StageResult:
+    return StageResult(outcomes=[FileOutcome(content_id=content_id, stage="x", success=success, error=error)])
+
+
+def _build_pipeline_side_effect(
+    content_id: str,
+    *,
+    sentiment_enabled: bool = False,
+    fail_stage: str | None = None,
+):
+    """Return a callable suitable for `_run_pipeline=...` that simulates the
+    real pipeline's side effects: writes per-stage JSONs into the configured
+    directories and returns a PipelineResult reflecting success/failure."""
+
+    def fake_run_pipeline(
+        *, source_dir, demucs_output_dir, diarization_dir, transcription_dir, sentiment_dir, **kwargs
+    ):
+        # Write diarization JSON unless told to fail diarization.
+        diarization_dir.mkdir(parents=True, exist_ok=True)
+        transcription_dir.mkdir(parents=True, exist_ok=True)
+        if sentiment_enabled:
+            sentiment_dir.mkdir(parents=True, exist_ok=True)
+
+        # Minimal valid JSON for each stage's Pydantic model.
+        audio_blob = {
+            "path": str(source_dir / f"audio_{content_id}.wav"),
+            "sample_rate": 16000,
+            "channels": 1,
+            "duration_seconds": 1.0,
+            "frames": 16000,
+            "format_str": "WAV",
+            "subtype": "PCM_16",
+        }
+        ts = "2026-05-19T22:00:00"
+        diar_doc = {
+            "input_file": audio_blob["path"],
+            "input_info": audio_blob,
+            "segments": [],
+            "num_speakers": 0,
+            "device": "cpu",
+            "processing_time_seconds": 0.1,
+            "started_at": ts,
+            "completed_at": ts,
+        }
+        tx_doc = {
+            "input_file": audio_blob["path"],
+            "input_info": audio_blob,
+            "language": "en",
+            "segments": [],
+            "device": "cpu",
+            "compute_type": "float16",
+            "batch_size": 16,
+            "processing_time_seconds": 0.1,
+            "started_at": ts,
+            "completed_at": ts,
+        }
+        sent_doc = {
+            "transcription_file": str(transcription_dir / f"transcription_{content_id}.json"),
+            "segments": [],
+            "device": "cpu",
+            "processing_time_seconds": 0.05,
+            "started_at": ts,
+            "completed_at": ts,
+        }
+
+        import json
+
+        if fail_stage != "diarization":
+            (diarization_dir / f"diarization_{content_id}.json").write_text(json.dumps(diar_doc))
+        if fail_stage != "transcription":
+            (transcription_dir / f"transcription_{content_id}.json").write_text(json.dumps(tx_doc))
+        if sentiment_enabled and fail_stage != "sentiment":
+            (sentiment_dir / f"sentiment_{content_id}.json").write_text(json.dumps(sent_doc))
+
+        sep_outcomes = [FileOutcome(content_id=content_id, stage="separate", success=True)]
+        diar_outcomes = [
+            FileOutcome(
+                content_id=content_id,
+                stage="diarize",
+                success=fail_stage != "diarization",
+                error="boom" if fail_stage == "diarization" else None,
+            )
+        ]
+        tx_outcomes = [
+            FileOutcome(
+                content_id=content_id,
+                stage="transcribe",
+                success=fail_stage not in ("diarization", "transcription"),
+                error="boom" if fail_stage == "transcription" else None,
+            )
+        ]
+        sent_outcomes = []
+        if sentiment_enabled:
+            sent_outcomes = [
+                FileOutcome(
+                    content_id=content_id,
+                    stage="sentiment",
+                    success=fail_stage != "sentiment",
+                    error="boom" if fail_stage == "sentiment" else None,
+                )
+            ]
+
+        return PipelineResult(
+            total_discovered=1,
+            separation=StageResult(outcomes=sep_outcomes),
+            diarization=StageResult(outcomes=diar_outcomes),
+            transcription=StageResult(outcomes=tx_outcomes),
+            sentiment=StageResult(outcomes=sent_outcomes),
+        )
+
+    return fake_run_pipeline
+
+
+def _register_job_and_batch(
+    registries: Registries,
+    *,
+    job_id: str = "rfj_abc123def4567890",
+    batch_id: str = "btc_xyz",
+    summary_uri: str = "file:///tmp/summary.json",
+    input_uri: str = "file:///inbox/x.wav",
+    output_uri: str = "file:///outbox/x.json",
+) -> tuple[Job, Batch]:
+    job = Job(
+        job_id=job_id,
+        batch_id=batch_id,
+        input_uri=input_uri,
+        output_uri=output_uri,
+    )
+    registries.jobs.add(job)
+    batch = Batch(
+        batch_id=batch_id,
+        summary_uri=summary_uri,
+        job_ids=[job_id],
+    )
+    registries.batches.add(batch)
+    return job, batch
+
+
+@pytest.fixture
+def handles() -> PipelineHandles:
+    return PipelineHandles(diarization=MagicMock(), whisperx=MagicMock(), sentiment=None)
+
+
+@pytest.fixture
+def config() -> ServiceConfig:
+    return ServiceConfig(device="cpu", sentiment_enabled=False)
+
+
+def test_process_job_happy_path_writes_transcript_and_marks_completed(
+    handles: PipelineHandles, config: ServiceConfig, tmp_path: Path
+) -> None:
+    registries = Registries()
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"x")
+    job, _ = _register_job_and_batch(
+        registries,
+        input_uri=f"file://{audio}",
+        output_uri=f"file://{tmp_path / 'out.json'}",
+    )
+    content_id = job.job_id.removeprefix("rfj_")
+
+    with (
+        patch("src.service.jobs.run_pipeline", new=_build_pipeline_side_effect(content_id)),
+        patch("src.service.jobs.upload") as upload_mock,
+        patch("src.service.jobs.notify_job_failed") as notify,
+    ):
+        process_job(job, handles, config, registries)
+
+    fetched = registries.jobs.get(job.job_id)
+    assert fetched is not None
+    assert fetched.status == "completed"
+    assert fetched.duration_seconds is not None
+    assert fetched.completed_at is not None
+    assert fetched.stage is None
+    assert fetched.error is None
+
+    upload_mock.assert_called_once()
+    notify.assert_not_called()
+
+
+def test_process_job_download_failure_marks_failed_and_notifies(
+    handles: PipelineHandles, config: ServiceConfig, tmp_path: Path
+) -> None:
+    from src.service.uri_io import FetchError
+
+    registries = Registries()
+    job, _ = _register_job_and_batch(registries, input_uri="file:///nonexistent/x.wav")
+
+    with (
+        patch("src.service.jobs.fetch_input", side_effect=FetchError("not found")),
+        patch("src.service.jobs.run_pipeline") as run_mock,
+        patch("src.service.jobs.upload") as upload_mock,
+        patch("src.service.jobs.notify_job_failed") as notify,
+    ):
+        process_job(job, handles, config, registries)
+
+    fetched = registries.jobs.get(job.job_id)
+    assert fetched is not None
+    assert fetched.status == "failed"
+    assert fetched.stage == "download"
+    assert fetched.retryable is True
+    run_mock.assert_not_called()
+    upload_mock.assert_not_called()
+    notify.assert_called_once()
+    assert notify.call_args.args[1] == "download"
+
+
+def test_process_job_transcribe_failure_marks_failed_no_upload(
+    handles: PipelineHandles, config: ServiceConfig, tmp_path: Path
+) -> None:
+    registries = Registries()
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"x")
+    job, _ = _register_job_and_batch(registries, input_uri=f"file://{audio}")
+    content_id = job.job_id.removeprefix("rfj_")
+
+    with (
+        patch(
+            "src.service.jobs.run_pipeline",
+            new=_build_pipeline_side_effect(content_id, fail_stage="transcription"),
+        ),
+        patch("src.service.jobs.upload") as upload_mock,
+        patch("src.service.jobs.notify_job_failed") as notify,
+    ):
+        process_job(job, handles, config, registries)
+
+    fetched = registries.jobs.get(job.job_id)
+    assert fetched is not None
+    assert fetched.status == "failed"
+    assert fetched.stage == "transcribe"
+    upload_mock.assert_not_called()
+    notify.assert_called_once()
+
+
+def test_process_job_upload_failure_marks_failed(
+    handles: PipelineHandles, config: ServiceConfig, tmp_path: Path
+) -> None:
+    from src.service.uri_io import UploadError
+
+    registries = Registries()
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"x")
+    job, _ = _register_job_and_batch(registries, input_uri=f"file://{audio}")
+    content_id = job.job_id.removeprefix("rfj_")
+
+    with (
+        patch("src.service.jobs.run_pipeline", new=_build_pipeline_side_effect(content_id)),
+        patch("src.service.jobs.upload", side_effect=UploadError("403")),
+        patch("src.service.jobs.notify_job_failed") as notify,
+    ):
+        process_job(job, handles, config, registries)
+
+    fetched = registries.jobs.get(job.job_id)
+    assert fetched is not None
+    assert fetched.status == "failed"
+    assert fetched.stage == "upload"
+    assert fetched.retryable is True
+    notify.assert_called_once()
+
+
+def test_process_job_uncaught_exception_marks_failed(
+    handles: PipelineHandles, config: ServiceConfig, tmp_path: Path
+) -> None:
+    registries = Registries()
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"x")
+    job, _ = _register_job_and_batch(registries, input_uri=f"file://{audio}")
+
+    with (
+        patch("src.service.jobs.run_pipeline", side_effect=RuntimeError("pipeline crashed")),
+        patch("src.service.jobs.notify_job_failed") as notify,
+    ):
+        process_job(job, handles, config, registries)
+
+    fetched = registries.jobs.get(job.job_id)
+    assert fetched is not None
+    assert fetched.status == "failed"
+    assert fetched.stage == "transcribe"
+    assert "pipeline crashed" in (fetched.error or "")
+    notify.assert_called_once()
+
+
+def test_process_job_persists_intermediates_when_configured(handles: PipelineHandles, tmp_path: Path) -> None:
+    intermediate_root = tmp_path / "intermediates"
+    config = ServiceConfig(device="cpu", intermediate_dir=intermediate_root)
+    registries = Registries()
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"x")
+    job, _ = _register_job_and_batch(registries, input_uri=f"file://{audio}")
+    content_id = job.job_id.removeprefix("rfj_")
+
+    with (
+        patch("src.service.jobs.run_pipeline", new=_build_pipeline_side_effect(content_id)),
+        patch("src.service.jobs.upload"),
+        patch("src.service.jobs.notify_job_failed"),
+    ):
+        process_job(job, handles, config, registries)
+
+    persisted_dir = intermediate_root / job.job_id
+    assert persisted_dir.is_dir()
+    assert (persisted_dir / f"diarization_{content_id}.json").is_file()
+    assert (persisted_dir / f"transcription_{content_id}.json").is_file()
+
+
+def test_finalize_batch_uploads_summary_with_all_terminal_jobs(tmp_path: Path) -> None:
+    registries = Registries()
+    summary_path = tmp_path / "summary.json"
+    batch = Batch(
+        batch_id="btc_x",
+        summary_uri=f"file://{summary_path}",
+        job_ids=["rfj_a", "rfj_b"],
+    )
+    registries.batches.add(batch)
+
+    # One success, one failure.
+    completed = Job(
+        job_id="rfj_a",
+        batch_id="btc_x",
+        input_uri="file:///x.wav",
+        output_uri="file:///x.json",
+        status="completed",
+        started_at=datetime(2026, 5, 19),
+        completed_at=datetime(2026, 5, 19, 0, 1),
+        duration_seconds=60.0,
+    )
+    failed = Job(
+        job_id="rfj_b",
+        batch_id="btc_x",
+        input_uri="file:///y.wav",
+        output_uri="file:///y.json",
+        status="failed",
+        started_at=datetime(2026, 5, 19),
+        failed_at=datetime(2026, 5, 19, 0, 1),
+        stage="transcribe",
+        error="boom",
+        retryable=False,
+    )
+    registries.jobs.add(completed)
+    registries.jobs.add(failed)
+
+    with patch("src.service.jobs.upload") as upload_mock:
+        finalize_batch("btc_x", registries)
+
+    upload_mock.assert_called_once()
+    args, _ = upload_mock.call_args
+    assert args[0] == f"file://{summary_path}"
+    payload = args[1]
+    assert payload["batch_id"] == "btc_x"
+    assert payload["totals"] == {"submitted": 2, "completed": 1, "failed": 1}
+    assert {j["job_id"] for j in payload["jobs"]} == {"rfj_a", "rfj_b"}
+
+
+def test_finalize_batch_upload_failure_does_not_raise() -> None:
+    from src.service.uri_io import UploadError
+
+    registries = Registries()
+    registries.batches.add(Batch(batch_id="btc_x", summary_uri="https://x/s.json", job_ids=[]))
+
+    # Must not raise.
+    with patch("src.service.jobs.upload", side_effect=UploadError("403")):
+        finalize_batch("btc_x", registries)
+
+
+def test_worker_processes_queued_job_and_finalizes_batch(
+    handles: PipelineHandles, config: ServiceConfig, tmp_path: Path
+) -> None:
+    registries = Registries()
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"x")
+    summary_path = tmp_path / "summary.json"
+    job, batch = _register_job_and_batch(
+        registries,
+        input_uri=f"file://{audio}",
+        output_uri=f"file://{tmp_path / 'out.json'}",
+        summary_uri=f"file://{summary_path}",
+    )
+    content_id = job.job_id.removeprefix("rfj_")
+    registries.queue.put_nowait(job.job_id)
+
+    fake_run = _build_pipeline_side_effect(content_id)
+    with (
+        patch("src.service.jobs.run_pipeline", new=fake_run),
+        patch("src.service.jobs.notify_job_failed"),
+    ):
+        worker = Worker(registries, handles, config, get_timeout=0.05)
+        worker.start()
+        # Wait up to 2 seconds for completion.
+        for _ in range(40):
+            if registries.batches.get("btc_xyz").completed_at is not None:  # type: ignore[union-attr]
+                break
+            time.sleep(0.05)
+        worker.stop(timeout=2.0)
+
+    fetched_job = registries.jobs.get(job.job_id)
+    assert fetched_job is not None
+    assert fetched_job.status == "completed"
+
+    # Summary was written.
+    assert summary_path.is_file()
+
+
+def test_worker_continues_after_one_job_fails(handles: PipelineHandles, config: ServiceConfig, tmp_path: Path) -> None:
+    registries = Registries()
+
+    # Two jobs in one batch: first fails (bad file://), second succeeds.
+    good_audio = tmp_path / "good.wav"
+    good_audio.write_bytes(b"x")
+    summary_path = tmp_path / "summary.json"
+
+    bad = Job(
+        job_id="rfj_aaaaaaaaaaaaaaaa",
+        batch_id="btc_dual",
+        input_uri="file:///nonexistent/x.wav",
+        output_uri=f"file://{tmp_path / 'a.json'}",
+    )
+    good = Job(
+        job_id="rfj_bbbbbbbbbbbbbbbb",
+        batch_id="btc_dual",
+        input_uri=f"file://{good_audio}",
+        output_uri=f"file://{tmp_path / 'b.json'}",
+    )
+    registries.jobs.add(bad)
+    registries.jobs.add(good)
+    registries.batches.add(
+        Batch(
+            batch_id="btc_dual",
+            summary_uri=f"file://{summary_path}",
+            job_ids=[bad.job_id, good.job_id],
+        )
+    )
+    registries.queue.put_nowait(bad.job_id)
+    registries.queue.put_nowait(good.job_id)
+
+    fake_run = _build_pipeline_side_effect(good.job_id.removeprefix("rfj_"))
+    with (
+        patch("src.service.jobs.run_pipeline", new=fake_run),
+        patch("src.service.jobs.notify_job_failed"),
+    ):
+        worker = Worker(registries, handles, config, get_timeout=0.05)
+        worker.start()
+        for _ in range(40):
+            b = registries.batches.get("btc_dual")
+            if b is not None and b.completed_at is not None:
+                break
+            time.sleep(0.05)
+        worker.stop(timeout=2.0)
+
+    assert registries.jobs.get(bad.job_id).status == "failed"  # type: ignore[union-attr]
+    assert registries.jobs.get(good.job_id).status == "completed"  # type: ignore[union-attr]
+    assert summary_path.is_file()
+
+
+def test_worker_stop_terminates_thread() -> None:
+    registries = Registries()
+    handles = PipelineHandles(diarization=MagicMock(), whisperx=MagicMock())
+    config = ServiceConfig(device="cpu")
+    worker = Worker(registries, handles, config, get_timeout=0.05)
+    worker.start()
+    worker.stop(timeout=1.0)
+    assert worker._thread is None or not worker._thread.is_alive()

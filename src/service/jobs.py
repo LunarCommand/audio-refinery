@@ -8,22 +8,39 @@ they are pure assembly functions tightly coupled to this module's worker.
 
 from __future__ import annotations
 
+import contextlib
 import queue
 import secrets
+import shutil
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
+
+import structlog
 
 from src.models.diarization import DiarizationResult
 from src.models.sentiment import SentimentResult
 from src.models.transcription import TranscriptionResult
+from src.notifier import notify_job_failed
+from src.pipeline import PipelineResult, run_pipeline
+from src.service.lifecycle import PipelineHandles, ServiceConfig
 from src.service.schemas import (
     BatchSummary,
     BatchTotals,
     CombinedTranscript,
+    JobFailureStage,
     JobSummaryEntry,
+)
+from src.service.uri_io import (
+    FetchError,
+    UnsupportedScheme,
+    UploadError,
+    fetch_input,
+    upload,
 )
 
 
@@ -297,6 +314,347 @@ class Registries:
     jobs: JobRegistry = field(default_factory=JobRegistry)
     batches: BatchRegistry = field(default_factory=BatchRegistry)
     queue: JobQueue = field(default_factory=JobQueue)
+
+
+# ---------------------------------------------------------------------------
+# Worker — pulls jobs, runs the pipeline, uploads, and triggers batch summary
+# ---------------------------------------------------------------------------
+
+
+def _content_id_from_job_id(job_id: str) -> str:
+    """Strip the ``rfj_`` prefix so the per-job temp file matches the
+    ``audio_<content_id>.wav`` naming convention that ``run_pipeline`` expects."""
+    return job_id.removeprefix("rfj_")
+
+
+def _stage_to_failure_attribution(stage_name: str) -> JobFailureStage:
+    """Map an internal pipeline stage name to the public summary stage label.
+
+    All upstream stage failures (separation, diarization, transcription,
+    sentiment) collapse to ``transcribe`` in the public summary. The
+    distinction matters for ops via structured logs; consumers only need to
+    know the work didn't produce a transcript."""
+    # Every supported value resolves to "transcribe" today. The mapping shape
+    # exists so future work (e.g., separating a separation-stage failure
+    # category in v0.3.0) is a one-line change.
+    _: dict[str, JobFailureStage] = {
+        "separation": "transcribe",
+        "diarization": "transcribe",
+        "transcription": "transcribe",
+        "sentiment": "transcribe",
+    }
+    return _.get(stage_name, "transcribe")
+
+
+def _find_failed_stage(result: PipelineResult, content_id: str) -> tuple[str, str] | None:
+    """Return ``(stage_label, error_message)`` for the first failed stage of
+    ``content_id`` in ``result``, or ``None`` if every stage succeeded."""
+    stage_attr_names = ("separation", "diarization", "transcription", "sentiment")
+    for stage_attr in stage_attr_names:
+        stage_result = getattr(result, stage_attr)
+        for outcome in stage_result.outcomes:
+            if outcome.content_id == content_id and not outcome.success:
+                return stage_attr, outcome.error or "unknown error"
+    return None
+
+
+def _persist_intermediates(temp_root: Path, dest_root: Path) -> None:
+    """Best-effort copy of per-stage JSONs from the per-job temp dir to a
+    persistent location. Failures are caller-logged; this function only does
+    the file moves."""
+    dest_root.mkdir(parents=True, exist_ok=True)
+    for sub in ("diarization", "transcription", "sentiment"):
+        src = temp_root / sub
+        if not src.is_dir():
+            continue
+        for f in src.glob("*.json"):
+            shutil.copy2(f, dest_root / f.name)
+
+
+def process_job(
+    job: Job,
+    handles: PipelineHandles,
+    config: ServiceConfig,
+    registries: Registries,
+) -> None:
+    """Process one job end-to-end. Mutates the in-memory Job record via the
+    registry; returns nothing. Never writes anything to ``job.output_uri`` on
+    failure — the canonical failure surface is the batch summary.
+
+    External dependencies (``run_pipeline``, ``fetch_input``, ``upload``,
+    ``notify_job_failed``) are looked up at module scope so tests can patch
+    them via the usual ``patch("src.service.jobs.<name>")`` pattern.
+    """
+    started_at = datetime.now()
+    registries.jobs.update(job.job_id, status="processing", started_at=started_at)
+    log = structlog.get_logger(__name__).bind(job_id=job.job_id, batch_id=job.batch_id)
+    log.info("job.started", input_uri=job.input_uri)
+
+    content_id = _content_id_from_job_id(job.job_id)
+
+    with tempfile.TemporaryDirectory(prefix="rfj_") as tmpdir_name:
+        tmp = Path(tmpdir_name)
+        source_dir = tmp / "source"
+        source_dir.mkdir()
+        target_audio = source_dir / f"audio_{content_id}.wav"
+
+        # ── Fetch ─────────────────────────────────────────────────────────
+        try:
+            fetched = fetch_input(job.input_uri, target_audio)
+        except (FetchError, UnsupportedScheme) as exc:
+            _record_failure(registries, job, started_at, "download", str(exc), retryable=True, log=log)
+            return
+
+        # For file:// fetch_input returns the original path (no copy). Symlink
+        # it into source_dir so run_pipeline's discover_files picks it up via
+        # the expected naming convention.
+        if fetched != target_audio:
+            try:
+                target_audio.symlink_to(fetched)
+            except OSError:
+                shutil.copy2(fetched, target_audio)
+
+        # ── Run pipeline ──────────────────────────────────────────────────
+        diar_dir = tmp / "diarization"
+        tx_dir = tmp / "transcription"
+        sent_dir = tmp / "sentiment"
+        demucs_dir = tmp / "stems"
+        try:
+            result = run_pipeline(
+                source_dir=source_dir,
+                demucs_output_dir=demucs_dir,
+                diarization_dir=diar_dir,
+                transcription_dir=tx_dir,
+                sentiment_dir=sent_dir,
+                device=config.device,
+                compute_type=config.compute_type,
+                batch_size=config.batch_size,
+                language=config.language,
+                hf_token=config.hf_token,
+                enable_sentiment=config.sentiment_enabled,
+                manifest=[content_id],
+                whisper_model=config.whisper_model,
+                model_handles=handles,
+                resume=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — top-level safety net
+            _record_failure(registries, job, started_at, "transcribe", repr(exc), retryable=False, log=log)
+            return
+
+        failure = _find_failed_stage(result, content_id)
+        if failure is not None:
+            stage_name, error_msg = failure
+            label = _stage_to_failure_attribution(stage_name)
+            _record_failure(registries, job, started_at, label, error_msg, retryable=False, log=log)
+            return
+
+        # ── Assemble combined transcript ──────────────────────────────────
+        try:
+            diar_path = diar_dir / f"diarization_{content_id}.json"
+            tx_path = tx_dir / f"transcription_{content_id}.json"
+            diar = DiarizationResult.model_validate_json(diar_path.read_text())
+            tx = TranscriptionResult.model_validate_json(tx_path.read_text())
+            sentiment = None
+            if config.sentiment_enabled:
+                sent_path = sent_dir / f"sentiment_{content_id}.json"
+                if sent_path.exists():
+                    sentiment = SentimentResult.model_validate_json(sent_path.read_text())
+            combined = build_combined(diar, tx, sentiment)
+        except Exception as exc:  # noqa: BLE001 — assembly failures are local
+            _record_failure(registries, job, started_at, "transcribe", repr(exc), retryable=False, log=log)
+            return
+
+        # ── Upload ────────────────────────────────────────────────────────
+        try:
+            upload(job.output_uri, combined.model_dump(mode="json"))
+        except (UploadError, UnsupportedScheme) as exc:
+            _record_failure(registries, job, started_at, "upload", str(exc), retryable=True, log=log)
+            return
+
+        # ── Optional intermediate persistence ────────────────────────────
+        if config.intermediate_dir is not None:
+            try:
+                _persist_intermediates(tmp, config.intermediate_dir / job.job_id)
+            except OSError as exc:
+                log.warning("intermediate_persist.failed", error=repr(exc))
+
+        # ── Mark complete ────────────────────────────────────────────────
+        completed_at = datetime.now()
+        duration = (completed_at - started_at).total_seconds()
+        registries.jobs.update(
+            job.job_id,
+            status="completed",
+            completed_at=completed_at,
+            duration_seconds=duration,
+        )
+        log.info("job.completed", duration_seconds=duration)
+
+
+def _record_failure(
+    registries: Registries,
+    job: Job,
+    started_at: datetime,
+    stage: JobFailureStage,
+    error: str,
+    *,
+    retryable: bool,
+    log: object | None = None,
+) -> None:
+    """Mark a job failed in the registry and fire the failure-only Slack hook."""
+    failed_at = datetime.now()
+    registries.jobs.update(
+        job.job_id,
+        status="failed",
+        started_at=started_at,
+        failed_at=failed_at,
+        stage=stage,
+        error=error,
+        retryable=retryable,
+    )
+    if log is not None:
+        log.error("job.failed", stage=stage, error=error, retryable=retryable)  # type: ignore[attr-defined]
+    # Failure-only Slack policy: fires per-job on failure; success path is silent.
+    # notifier already swallows internally; belt-and-suspenders here.
+    with contextlib.suppress(Exception):
+        notify_job_failed(job.job_id, stage, job.input_uri, error)
+
+
+def _job_to_summary_entry(job: Job) -> JobSummaryEntry:
+    """Convert a terminal Job record into a JobSummaryEntry for the batch summary."""
+    if job.status == "completed":
+        return JobSummaryEntry(
+            job_id=job.job_id,
+            input_uri=job.input_uri,
+            output_uri=job.output_uri,
+            status="completed",
+            started_at=job.started_at or job.created_at,
+            completed_at=job.completed_at,
+            duration_seconds=job.duration_seconds,
+        )
+    return JobSummaryEntry(
+        job_id=job.job_id,
+        input_uri=job.input_uri,
+        output_uri=job.output_uri,
+        status="failed",
+        started_at=job.started_at or job.created_at,
+        failed_at=job.failed_at,
+        stage=job.stage,  # type: ignore[arg-type]
+        error=job.error,
+        retryable=job.retryable,
+    )
+
+
+def finalize_batch(
+    batch_id: str,
+    registries: Registries,
+    *,
+    completed_at: datetime | None = None,
+) -> None:
+    """Assemble and upload the batch summary for ``batch_id``.
+
+    Reads every terminal Job in the batch from the registry, builds a
+    BatchSummary via the existing factory, and PUTs it to the caller-supplied
+    summary_uri. Upload failure logs a structured warning but does not raise
+    — the worker thread must never die because the summary upload failed.
+    """
+    batch = registries.batches.get(batch_id)
+    if batch is None:
+        return
+    finished_at = completed_at if completed_at is not None else datetime.now()
+    registries.batches.mark_completed(batch_id, finished_at)
+
+    entries = []
+    for job_id in batch.job_ids:
+        job = registries.jobs.get(job_id)
+        if job is None:
+            continue  # already swept by retention or never registered
+        entries.append(_job_to_summary_entry(job))
+
+    summary = build_summary(
+        batch_id=batch_id,
+        submitted_at=batch.submitted_at,
+        completed_at=finished_at,
+        jobs=entries,
+    )
+
+    log = structlog.get_logger(__name__).bind(batch_id=batch_id)
+    try:
+        upload(batch.summary_uri, summary.model_dump(mode="json"))
+        log.info("batch.summary_uploaded", n_jobs=len(entries))
+    except (UploadError, UnsupportedScheme) as exc:
+        log.warning("batch.summary_upload_failed", summary_uri=batch.summary_uri, error=repr(exc))
+
+
+class Worker:
+    """Background daemon that pulls job_ids off the queue and processes them.
+
+    One worker per container — GPU is the bottleneck. Multiple workers on
+    the same GPU would thrash. Scale via container replicas, not via more
+    workers per process.
+    """
+
+    def __init__(
+        self,
+        registries: Registries,
+        handles: PipelineHandles,
+        config: ServiceConfig,
+        *,
+        get_timeout: float = 1.0,
+    ) -> None:
+        self._registries = registries
+        self._handles = handles
+        self._config = config
+        self._stop = threading.Event()
+        self._get_timeout = get_timeout
+        self._thread: threading.Thread | None = None
+        self._log = structlog.get_logger(__name__)
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="rfj-worker")
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            job_id = self._registries.queue.get(timeout=self._get_timeout)
+            if job_id is None:
+                continue
+            self._process_one(job_id)
+
+    def _process_one(self, job_id: str) -> None:
+        job = self._registries.jobs.get(job_id)
+        if job is None:
+            self._log.warning("worker.unknown_job", job_id=job_id)
+            return
+        try:
+            process_job(job, self._handles, self._config, self._registries)
+        except Exception as exc:  # noqa: BLE001 — last-resort safety net
+            self._log.exception("worker.uncaught_exception", job_id=job_id, error=repr(exc))
+            # Best-effort failure record so the batch summary stays accurate.
+            with contextlib.suppress(KeyError):
+                self._registries.jobs.update(
+                    job_id,
+                    status="failed",
+                    failed_at=datetime.now(),
+                    stage="transcribe",
+                    error=f"worker uncaught: {exc!r}",
+                    retryable=False,
+                )
+
+        # Decrement the batch's pending counter; finalize when it hits zero.
+        try:
+            remaining = self._registries.batches.decrement_pending(job.batch_id)
+        except KeyError:
+            return
+        if remaining == 0:
+            finalize_batch(job.batch_id, self._registries)
 
 
 __all__ = [
