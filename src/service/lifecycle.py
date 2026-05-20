@@ -48,7 +48,17 @@ ReadyState = Literal["loading", "ready", "failed"]
 
 @dataclass(frozen=True)
 class ServiceConfig:
-    """Container-startup configuration. Resolved from env vars in app.py."""
+    """Container-startup configuration. Resolved from env vars in app.py.
+
+    Thermal-guard fields:
+        ``gpu_temp_limit_celsius`` — °C threshold from ``REFINERY_GPU_TEMP_LIMIT``.
+            ``0`` (default) disables the guard entirely. Any positive value spawns
+            the daemon thread at lifespan startup.
+        ``gpu_temp_poll_seconds`` — how often the guard polls nvidia-smi, from
+            ``REFINERY_GPU_TEMP_POLL_SECONDS``. Default ``5.0`` matches the CLI's
+            ``_run_temp_guard`` cadence. Tune higher on shared hosts where
+            nvidia-smi polling is expensive.
+    """
 
     device: str = DEFAULT_DEVICE
     whisper_model: str = TRANSCRIBER_DEFAULT_MODEL
@@ -59,6 +69,8 @@ class ServiceConfig:
     sentiment_model: str = DEFAULT_SENTIMENT_MODEL
     sentiment_enabled: bool = False
     hf_token: str = ""
+    gpu_temp_limit_celsius: int = 0
+    gpu_temp_poll_seconds: float = 5.0
 
 
 @dataclass
@@ -244,6 +256,27 @@ def start_thermal_guard(
     return stop
 
 
+def start_thermal_guard_from_config(
+    config: ServiceConfig,
+    on_trip: Callable[[str, int, int], None],
+) -> threading.Event | None:
+    """Convenience wrapper that threads ``ServiceConfig`` fields into ``start_thermal_guard``.
+
+    The lifespan handler in ``app.py`` calls this once at startup. Direct callers
+    (tests, custom integrations) can still use ``start_thermal_guard`` with
+    explicit args.
+
+    Returns ``None`` when the guard is disabled (device is ``cpu`` or
+    ``gpu_temp_limit_celsius <= 0``).
+    """
+    return start_thermal_guard(
+        device=config.device,
+        limit_celsius=config.gpu_temp_limit_celsius,
+        on_trip=on_trip,
+        poll_interval_seconds=config.gpu_temp_poll_seconds,
+    )
+
+
 def default_thermal_trip(device: str, temp: int, limit: int) -> None:
     """Default ``on_trip`` callback for the thermal guard.
 
@@ -265,5 +298,6 @@ __all__ = [
     "WarmupError",
     "default_thermal_trip",
     "start_thermal_guard",
+    "start_thermal_guard_from_config",
     "warm_up",
 ]

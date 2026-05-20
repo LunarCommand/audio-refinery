@@ -21,6 +21,7 @@ from src.service.lifecycle import (
     WarmupError,
     default_thermal_trip,
     start_thermal_guard,
+    start_thermal_guard_from_config,
     warm_up,
 )
 
@@ -283,6 +284,61 @@ def test_thermal_guard_skips_silently_when_temp_query_returns_none():
         stop.set()
 
     callback.assert_not_called()
+
+
+def test_thermal_guard_from_config_threads_fields_through(monkeypatch: pytest.MonkeyPatch):
+    """The config-wrapper must pass `device`, `gpu_temp_limit_celsius`, and
+    `gpu_temp_poll_seconds` straight to the underlying start_thermal_guard call."""
+    captured = {}
+
+    def fake_start(*, device, limit_celsius, on_trip, poll_interval_seconds):
+        captured["device"] = device
+        captured["limit_celsius"] = limit_celsius
+        captured["poll_interval_seconds"] = poll_interval_seconds
+        captured["on_trip"] = on_trip
+        return threading.Event()
+
+    monkeypatch.setattr("src.service.lifecycle.start_thermal_guard", fake_start)
+
+    cb = MagicMock()
+    cfg = ServiceConfig(
+        device="cuda:1",
+        gpu_temp_limit_celsius=82,
+        gpu_temp_poll_seconds=2.5,
+    )
+    start_thermal_guard_from_config(cfg, cb)
+
+    assert captured["device"] == "cuda:1"
+    assert captured["limit_celsius"] == 82
+    assert captured["poll_interval_seconds"] == 2.5
+    assert captured["on_trip"] is cb
+
+
+def test_thermal_guard_from_config_returns_none_when_disabled():
+    """A config with default `gpu_temp_limit_celsius=0` skips the guard via the
+    underlying start_thermal_guard behavior — verified end-to-end (no patch)."""
+    cb = MagicMock()
+    cfg = ServiceConfig()  # all defaults; limit is 0
+    result = start_thermal_guard_from_config(cfg, cb)
+    assert result is None
+    cb.assert_not_called()
+
+
+def test_thermal_guard_from_config_uses_configured_poll_interval():
+    """Verify the configured poll interval reaches the daemon thread by mocking
+    the temperature query and observing how quickly the trip callback fires."""
+    cb = MagicMock()
+    cfg = ServiceConfig(
+        device="cuda:0",
+        gpu_temp_limit_celsius=85,
+        gpu_temp_poll_seconds=0.02,
+    )
+    with patch("src.service.lifecycle.query_gpu_temperature", return_value=95):
+        stop = start_thermal_guard_from_config(cfg, cb)
+        assert stop is not None
+        time.sleep(0.1)  # plenty of ticks at 20ms cadence
+        stop.set()
+    cb.assert_called()
 
 
 def test_default_thermal_trip_calls_notifier_and_exits(monkeypatch: pytest.MonkeyPatch):
