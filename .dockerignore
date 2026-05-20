@@ -20,6 +20,11 @@ coverage.xml
 .env
 assets/
 
+# Feature-planning working artifacts (gitignored locally; not part of the image)
+_reqs/
+_plans/
+_docs/
+
 # Dev tooling
 .pre-commit-config.yaml
 .claude/
