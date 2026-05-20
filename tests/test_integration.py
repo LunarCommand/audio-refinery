@@ -3,15 +3,17 @@
 These tests require:
 - Demucs installed and on PATH
 - A GPU (or CPU with patience)
-- A test audio file at the path below
+- At least one WAV file in the integration audio directory (set via
+  ``REFINERY_TEST_AUDIO_DIR``, or drop files in ``tests/_audio_fixtures/``)
 - For diarization: HF_TOKEN set in environment or .env
 - For transcription: whisperx installed (see README for install steps)
 - For sentiment: transformers installed
 
-Run with: make test-refinery-integration
-"""
+The ``integration_audio`` and ``integration_audio_files`` fixtures live in
+``tests/conftest.py`` so the service-mode integration tests share them.
 
-from pathlib import Path
+Run with: make test-integration
+"""
 
 import pytest
 
@@ -20,17 +22,7 @@ from src.sentiment_analyzer import analyze_sentiment, merge_sentiment_into_trans
 from src.separator import separate
 from src.transcriber import transcribe
 
-TEST_AUDIO_PATH = Path("/mnt/fast_scratch/test_fixtures/test_audio.wav")
-
-
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture
-def integration_audio():
-    if not TEST_AUDIO_PATH.exists():
-        pytest.skip(f"Test audio not found: {TEST_AUDIO_PATH}")
-    return TEST_AUDIO_PATH
 
 
 def test_real_separation(integration_audio, tmp_path):

@@ -1,5 +1,6 @@
 """Shared test fixtures for refinery tests."""
 
+import os
 import struct
 import wave
 from pathlib import Path
@@ -57,6 +58,48 @@ def fake_wav(tmp_path: Path) -> Path:
         wf.setframerate(44100)
         wf.writeframes(struct.pack(f"<{n_frames}h", *([0] * n_frames)))
     return wav_path
+
+
+def _resolve_integration_audio_dir() -> Path:
+    """Return the directory holding WAV files for integration tests.
+
+    Resolution order:
+      1. ``REFINERY_TEST_AUDIO_DIR`` env var (preferred — lets each host
+         point at whatever local fixture store it has).
+      2. ``tests/_audio_fixtures/`` in the repo (developer convenience;
+         gitignored so contributors can drop files there without committing).
+    """
+    env = os.getenv("REFINERY_TEST_AUDIO_DIR")
+    if env:
+        return Path(env)
+    return Path(__file__).parent / "_audio_fixtures"
+
+
+@pytest.fixture
+def integration_audio_files() -> list[Path]:
+    """Return all WAV files available for integration tests, or skip.
+
+    Used by ``@pytest.mark.integration`` tests that need real audio. The
+    fixture skips the test cleanly when no fixtures are present, so the
+    suite runs everywhere — only running the integration paths on hosts
+    that actually have audio files.
+    """
+    audio_dir = _resolve_integration_audio_dir()
+    if not audio_dir.is_dir():
+        pytest.skip(
+            f"Integration audio directory not found: {audio_dir}. "
+            "Set REFINERY_TEST_AUDIO_DIR=<path-to-wavs> or drop WAV files in tests/_audio_fixtures/."
+        )
+    wavs = sorted(audio_dir.glob("*.wav"))
+    if not wavs:
+        pytest.skip(f"No WAV files found in {audio_dir}; integration tests require at least one .wav")
+    return wavs
+
+
+@pytest.fixture
+def integration_audio(integration_audio_files: list[Path]) -> Path:
+    """Single-WAV convenience fixture for tests that only need one file."""
+    return integration_audio_files[0]
 
 
 @pytest.fixture

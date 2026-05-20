@@ -25,6 +25,9 @@ _reqs/
 _plans/
 _docs/
 
+# Local audio fixtures for integration tests (large, host-specific)
+tests/_audio_fixtures/
+
 # Dev tooling
 .pre-commit-config.yaml
 .claude/

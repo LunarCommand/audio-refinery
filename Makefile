@@ -29,7 +29,9 @@ test: ## Run unit tests (no GPU required)
 test-verbose: ## Run unit tests with verbose output
 	uv run python -m pytest tests/ -m "not integration" -vv
 
-test-integration: ## Run integration tests (requires GPU + models)
+test-integration: ## Run integration tests (GPU + REFINERY_TEST_AUDIO_DIR + HF_TOKEN required)
+	@echo "Integration tests use WAV files from REFINERY_TEST_AUDIO_DIR (or tests/_audio_fixtures/)."
+	@echo "Set HF_TOKEN for pyannote model download. Tests skip cleanly when fixtures are missing."
 	uv run python -m pytest tests/ -m "integration" -v
 
 test-coverage: ## Run unit tests with coverage report (fails under 75%)
