@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Scoped both GitHub Actions workflows (`ci.yml`, `release.yml`) to least-privilege permissions. Workflow default is now `contents: read`; the `github-release` job retains an explicit `contents: write` override. Closes CodeQL workflow-permission alerts.
+- Upgraded vulnerable transitive dependencies: `idna` 3.11 → 3.15, `Mako` 1.3.10 → 1.3.12, `Pillow` 12.1.1 → 12.2.0, `urllib3` 2.6.3 → 2.7.0. Closes nine Dependabot alerts covering path-traversal, redirect-header forwarding, decompression-bomb, OOB-write, and integer-overflow CVEs.
+
+### Known security debt
+
+- 18 Dependabot alerts remain open against `torch` and `transformers` (including one critical and several high severity). Both packages are pinned to WhisperX-compatible versions (`torch==2.1.2`, `transformers>=4.30,<4.40`) and cannot be upgraded without breaking the current ASR pipeline. These alerts close together when v0.3.0 lands and removes WhisperX from the critical path; see the universal alignment plan for the migration path.
+
+### Tests
+
+- Suppressed live Slack webhook calls during the test run via an autouse `_no_slack` fixture in `tests/conftest.py`. Previously, `notifier._send()` loaded the developer's `.env` on every invocation and POSTed real messages whenever pipeline tests triggered end-of-batch notifications.
+
 ## [0.1.1] - 2026-03-06
 
 ### Added
