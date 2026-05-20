@@ -69,7 +69,7 @@ def _pipeline_side_effect(content_id: str):
         diarization_dir.mkdir(parents=True, exist_ok=True)
         transcription_dir.mkdir(parents=True, exist_ok=True)
         audio_blob = {
-            "path": str(source_dir / f"audio_{content_id}.wav"),
+            "path": str(source_dir / f"{content_id}.wav"),
             "sample_rate": 16000,
             "channels": 1,
             "duration_seconds": 1.0,
@@ -167,9 +167,9 @@ def test_e2e_file_uri_single_job_writes_transcript_and_summary(tmp_path: Path) -
     # where the worker could pull the job and call the real run_pipeline
     # before a post-POST patch took effect.
     def dynamic_run_pipeline(*, source_dir, **kwargs):
-        matches = list(source_dir.glob("audio_*.wav"))
+        matches = list(source_dir.glob("*.wav"))
         assert len(matches) == 1, f"expected exactly one audio file, got {matches}"
-        content_id = matches[0].stem.removeprefix("audio_")
+        content_id = matches[0].stem
         return _pipeline_side_effect(content_id)(source_dir=source_dir, **kwargs)
 
     with (
@@ -262,9 +262,9 @@ def test_e2e_multi_job_batch_processes_in_submission_order(tmp_path: Path) -> No
         # actual content_id (the worker derives it from the job_id).
         def dynamic_side_effect(*, source_dir, **kwargs):
             # Find the audio file the worker placed in source_dir.
-            matches = list(source_dir.glob("audio_*.wav"))
+            matches = list(source_dir.glob("*.wav"))
             assert len(matches) == 1
-            content_id = matches[0].stem.removeprefix("audio_")
+            content_id = matches[0].stem
             return _pipeline_side_effect(content_id)(source_dir=source_dir, **kwargs)
 
         with patch("src.service.jobs.run_pipeline", new=dynamic_side_effect):
@@ -329,9 +329,9 @@ def test_e2e_https_uri_routes_fetch_and_upload_through_httpx(tmp_path: Path) -> 
     # eliminates a race where the worker thread could pull the job and call
     # the real run_pipeline before a post-POST patch takes effect.
     def dynamic_run_pipeline(*, source_dir, **kwargs):
-        matches = list(source_dir.glob("audio_*.wav"))
+        matches = list(source_dir.glob("*.wav"))
         assert len(matches) == 1, f"expected exactly one audio file, got {matches}"
-        content_id = matches[0].stem.removeprefix("audio_")
+        content_id = matches[0].stem
         return _pipeline_side_effect(content_id)(source_dir=source_dir, **kwargs)
 
     client, registries = _build_app(tmp_path)

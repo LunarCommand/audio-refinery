@@ -866,7 +866,7 @@ def pipeline(
         console.print(
             Panel(
                 f"[bold]Source directory not found:[/bold] {source_path}\n"
-                "Create the directory and place audio_<content_id>.wav files inside it.",
+                "Create the directory and place .wav files inside it.",
                 title="[red bold]Error[/red bold]",
                 border_style="red",
             )
@@ -958,7 +958,7 @@ def pipeline(
         files = [(cid, p) for cid, p in files if cid in manifest_set]
 
     if not files:
-        console.print("[yellow]No audio_*.wav files found in source directory.[/yellow]")
+        console.print("[yellow]No .wav files found in source directory.[/yellow]")
         return
 
     total = len(files)
@@ -1432,7 +1432,7 @@ def pipeline_parallel(
         console.print(
             Panel(
                 f"[bold]Source directory not found:[/bold] {source_path}\n"
-                "Create the directory and place audio_<content_id>.wav files inside it.",
+                "Create the directory and place .wav files inside it.",
                 title="[red bold]Error[/red bold]",
                 border_style="red",
             )
@@ -1457,7 +1457,7 @@ def pipeline_parallel(
         all_files = discover_files(source_path)
 
     if not all_files:
-        console.print("[yellow]No audio_*.wav files found in source directory.[/yellow]")
+        console.print("[yellow]No .wav files found in source directory.[/yellow]")
         return
 
     # Sort largest-first (LPT heuristic) before interleaving so that the

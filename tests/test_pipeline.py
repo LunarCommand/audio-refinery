@@ -50,7 +50,7 @@ def source_dir(tmp_path: Path) -> Path:
     d = tmp_path / "extracted"
     d.mkdir()
     for cid in ["abc123", "def456", "ghi789"]:
-        _make_wav(d / f"audio_{cid}.wav")
+        _make_wav(d / f"{cid}.wav")
     return d
 
 
@@ -98,11 +98,37 @@ def test_discover_files_empty_dir(tmp_path: Path) -> None:
     assert discover_files(tmp_path) == []
 
 
-def test_discover_files_ignores_non_matching(source_dir: Path) -> None:
-    _make_wav(source_dir / "other.wav")
+def test_discover_files_ignores_non_wav_extensions(source_dir: Path) -> None:
+    """Non-.wav files (e.g. mp3) are ignored; any .wav stem is accepted."""
     (source_dir / "audio_something.mp3").write_bytes(b"x")
     files = discover_files(source_dir)
-    assert len(files) == 3  # only the original three
+    # Source dir already has the 3 fixture WAVs; the mp3 isn't picked up.
+    assert len(files) == 3
+
+
+def test_discover_files_accepts_arbitrary_stem(source_dir: Path) -> None:
+    """Any .wav file is discovered. Content_id is the filename stem."""
+    _make_wav(source_dir / "other.wav")
+    _make_wav(source_dir / "1C92S21It9-gFDeHOJg5c.wav")
+    files = discover_files(source_dir)
+    ids = {cid for cid, _ in files}
+    # 3 fixture cids + 2 added.
+    assert "other" in ids
+    assert "1C92S21It9-gFDeHOJg5c" in ids
+    assert len(files) == 5
+
+
+def test_discover_files_strips_audio_prefix_for_backward_compat(tmp_path: Path) -> None:
+    """Files named ``audio_<id>.wav`` (the upstream audio-extractor convention)
+    still produce ``content_id = <id>`` — same as the old behavior, so runs that
+    used to land in diarization_<id>.json still go to the same place."""
+    d = tmp_path / "extracted"
+    d.mkdir()
+    _make_wav(d / "audio_legacy123.wav")
+    _make_wav(d / "newstyle.wav")
+    files = discover_files(d)
+    ids = {cid for cid, _ in files}
+    assert ids == {"legacy123", "newstyle"}
 
 
 def test_discover_files_sorted(source_dir: Path) -> None:
@@ -869,7 +895,7 @@ def test_run_pipeline_no_vocals_deleted_when_events_disabled(source_dir: Path, t
     def _sep_side_effect(**kwargs):
         # Derive the content_id from the actual input file so each call creates
         # stems for the correct file, not always for the first cid.
-        current_cid = kwargs["input_file"].stem[len("audio_") :]
+        current_cid = kwargs["input_file"].stem
         _make_wav(_vocals_path(current_cid, demucs_dir))
         _make_wav(_no_vocals_path(current_cid, demucs_dir))
         return MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
@@ -917,7 +943,7 @@ def test_run_pipeline_no_vocals_kept_when_events_enabled(source_dir: Path, tmp_p
     no_vocals = _no_vocals_path(cid, demucs_dir)
 
     def _sep_side_effect(**kwargs):
-        current_cid = kwargs["input_file"].stem[len("audio_") :]
+        current_cid = kwargs["input_file"].stem
         _make_wav(_vocals_path(current_cid, demucs_dir))
         _make_wav(_no_vocals_path(current_cid, demucs_dir))
         return MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
@@ -965,7 +991,7 @@ def test_run_pipeline_vocals_deleted_after_transcription(source_dir: Path, tmp_p
     vocals = _vocals_path(cid, demucs_dir)
 
     def _sep_side_effect(**kwargs):
-        current_cid = kwargs["input_file"].stem[len("audio_") :]
+        current_cid = kwargs["input_file"].stem
         _make_wav(_vocals_path(current_cid, demucs_dir))
         return MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
 

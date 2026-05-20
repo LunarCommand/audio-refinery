@@ -322,8 +322,8 @@ class Registries:
 
 
 def _content_id_from_job_id(job_id: str) -> str:
-    """Strip the ``rfj_`` prefix so the per-job temp file matches the
-    ``audio_<content_id>.wav`` naming convention that ``run_pipeline`` expects."""
+    """Strip the ``rfj_`` prefix; the result becomes the stem of the per-job
+    audio file the worker materializes for ``run_pipeline``."""
     return job_id.removeprefix("rfj_")
 
 
@@ -397,7 +397,7 @@ def process_job(
         tmp = Path(tmpdir_name)
         source_dir = tmp / "source"
         source_dir.mkdir()
-        target_audio = source_dir / f"audio_{content_id}.wav"
+        target_audio = source_dir / f"{content_id}.wav"
 
         # ── Fetch ─────────────────────────────────────────────────────────
         try:

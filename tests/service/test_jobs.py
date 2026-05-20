@@ -308,7 +308,7 @@ def _build_pipeline_side_effect(
 
         # Minimal valid JSON for each stage's Pydantic model.
         audio_blob = {
-            "path": str(source_dir / f"audio_{content_id}.wav"),
+            "path": str(source_dir / f"{content_id}.wav"),
             "sample_rate": 16000,
             "channels": 1,
             "duration_seconds": 1.0,

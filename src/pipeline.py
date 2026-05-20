@@ -202,19 +202,21 @@ class PipelineResult:
 
 
 def discover_files(source_dir: Path) -> list[tuple[str, Path]]:
-    """Discover WAV files in source_dir and extract content IDs.
+    """Discover WAV files in source_dir and derive a content_id per file.
 
-    Expects filenames of the form ``audio_<content_id>.wav``.
+    Accepts any ``.wav`` file. The content_id is the filename stem with an
+    optional ``audio_`` prefix stripped — i.e., ``audio_xyz.wav`` and
+    ``xyz.wav`` both produce content_id ``xyz``. The prefix-stripping is
+    backward compatibility with the upstream audio-extractor naming
+    convention; new adopters can use any filename.
 
     Returns:
         Sorted list of ``(content_id, wav_path)`` tuples.
     """
     files = []
-    for wav_path in sorted(source_dir.glob("audio_*.wav")):
-        stem = wav_path.stem
-        if stem.startswith("audio_"):
-            content_id = stem[len("audio_") :]
-            files.append((content_id, wav_path))
+    for wav_path in sorted(source_dir.glob("*.wav")):
+        content_id = wav_path.stem.removeprefix("audio_")
+        files.append((content_id, wav_path))
     return files
 
 
@@ -236,14 +238,19 @@ def partition_ids(ids: list[str], n: int = 2) -> list[list[str]]:
     return [[ids[i] for i in range(start, len(ids), n)] for start in range(n)]
 
 
-def _vocals_path(content_id: str, demucs_output_dir: Path, model: str = DEFAULT_MODEL) -> Path:
-    """Predict where Demucs will write vocals.wav for a given content_id."""
-    return demucs_output_dir / model / f"audio_{content_id}" / "vocals.wav"
+def _vocals_path(input_stem: str, demucs_output_dir: Path, model: str = DEFAULT_MODEL) -> Path:
+    """Predict where Demucs will write vocals.wav for an input named ``<input_stem>.wav``.
+
+    Demucs derives its per-track subdirectory from the input filename stem;
+    this helper mirrors that convention. Pass ``wav_path.stem`` from
+    ``discover_files``.
+    """
+    return demucs_output_dir / model / input_stem / "vocals.wav"
 
 
-def _no_vocals_path(content_id: str, demucs_output_dir: Path, model: str = DEFAULT_MODEL) -> Path:
-    """Predict where Demucs will write no_vocals.wav for a given content_id."""
-    return demucs_output_dir / model / f"audio_{content_id}" / "no_vocals.wav"
+def _no_vocals_path(input_stem: str, demucs_output_dir: Path, model: str = DEFAULT_MODEL) -> Path:
+    """Predict where Demucs will write no_vocals.wav for an input named ``<input_stem>.wav``."""
+    return demucs_output_dir / model / input_stem / "no_vocals.wav"
 
 
 def _diarization_path(content_id: str, diarization_dir: Path) -> Path:
@@ -330,7 +337,7 @@ def run_separation_stage(
         if on_file:
             on_file(content_id, i, total)
 
-        vocals = _vocals_path(content_id, demucs_output_dir)
+        vocals = _vocals_path(wav_path.stem, demucs_output_dir)
         if resume and _file_complete(vocals):
             result.outcomes.append(FileOutcome(content_id=content_id, stage="separate", success=True, skipped=True))
             continue
@@ -405,7 +412,7 @@ def run_diarization_stage(
             result.outcomes.append(FileOutcome(content_id=content_id, stage="diarize", success=False, error=str(exc)))
         return result
 
-    for i, (content_id, _) in enumerate(eligible):
+    for i, (content_id, wav_path) in enumerate(eligible):
         if on_file:
             on_file(content_id, i, len(eligible))
 
@@ -414,7 +421,7 @@ def run_diarization_stage(
             result.outcomes.append(FileOutcome(content_id=content_id, stage="diarize", success=True, skipped=True))
             continue
 
-        vocals = _vocals_path(content_id, demucs_output_dir)
+        vocals = _vocals_path(wav_path.stem, demucs_output_dir)
         try:
             diar = diarize(input_file=vocals, device=device, hf_token=hf_token, _pipeline=pipeline)
             diar_path.write_text(diar.model_dump_json(indent=2))
@@ -514,7 +521,7 @@ def run_transcription_stage(
             )
         return result
 
-    for i, (content_id, _) in enumerate(eligible):
+    for i, (content_id, wav_path) in enumerate(eligible):
         if on_file:
             on_file(content_id, i, len(eligible))
 
@@ -523,7 +530,7 @@ def run_transcription_stage(
             result.outcomes.append(FileOutcome(content_id=content_id, stage="transcribe", success=True, skipped=True))
             continue
 
-        vocals = _vocals_path(content_id, demucs_output_dir)
+        vocals = _vocals_path(wav_path.stem, demucs_output_dir)
         diar_path = _diarization_path(content_id, diarization_dir)
         diar_file = diar_path if _file_complete(diar_path) else None
 
@@ -596,7 +603,9 @@ def run_pipeline(
     worth of data at any time regardless of total file count.
 
     Args:
-        source_dir: Directory containing audio_<content_id>.wav files.
+        source_dir: Directory containing ``.wav`` files. The filename stem
+            becomes the content_id (with an optional ``audio_`` prefix
+            stripped for backward compatibility).
         demucs_output_dir: Demucs output root directory (RAM disk strongly recommended).
         diarization_dir: Directory for diarization_<content_id>.json files.
         transcription_dir: Directory for transcription_<content_id>.json files.
@@ -669,9 +678,9 @@ def run_pipeline(
                 FileOutcome(content_id=content_id, stage="transcribe", success=True, skipped=True)
             )
             if not keep_scratch:
-                _cleanup_stem(_vocals_path(content_id, demucs_output_dir))
+                _cleanup_stem(_vocals_path(wav_path.stem, demucs_output_dir))
                 if not enable_events:
-                    _cleanup_stem(_no_vocals_path(content_id, demucs_output_dir))
+                    _cleanup_stem(_no_vocals_path(wav_path.stem, demucs_output_dir))
         else:
             pending.append((content_id, wav_path))
 
@@ -740,8 +749,8 @@ def run_pipeline(
         # ── Pass 2: process each pending file through all active stages ────
         for content_id, wav_path in pending:
             file_idx = file_index_map[content_id]
-            vocals = _vocals_path(content_id, demucs_output_dir)
-            no_vocals = _no_vocals_path(content_id, demucs_output_dir)
+            vocals = _vocals_path(wav_path.stem, demucs_output_dir)
+            no_vocals = _no_vocals_path(wav_path.stem, demucs_output_dir)
             diar_path = _diarization_path(content_id, diarization_dir)
             tx_path = _transcription_path(content_id, transcription_dir)
 
