@@ -328,6 +328,16 @@ def test_e2e_https_uri_routes_fetch_and_upload_through_httpx(tmp_path: Path) -> 
         with httpx.Client(transport=transport) as c:
             return c.put(url, **kwargs)
 
+    # Dynamic side_effect — derives content_id from the source_dir the worker
+    # creates per-job, so the patch can be applied BEFORE the POST. This
+    # eliminates a race where the worker thread could pull the job and call
+    # the real run_pipeline before a post-POST patch takes effect.
+    def dynamic_run_pipeline(*, source_dir, **kwargs):
+        matches = list(source_dir.glob("audio_*.wav"))
+        assert len(matches) == 1, f"expected exactly one audio file, got {matches}"
+        content_id = matches[0].stem.removeprefix("audio_")
+        return _pipeline_side_effect(content_id)(source_dir=source_dir, **kwargs)
+
     client, registries = _build_app(tmp_path)
     input_uri = "https://bucket.example.com/audio/x.wav?X-Amz-Signature=abc"
     output_uri = "https://bucket.example.com/transcript/x.json?X-Amz-Signature=def"
@@ -341,16 +351,13 @@ def test_e2e_https_uri_routes_fetch_and_upload_through_httpx(tmp_path: Path) -> 
         client,
         patch("src.service.uri_io.httpx.stream", new=patched_stream),
         patch("src.service.uri_io.httpx.put", new=patched_put),
+        patch("src.service.jobs.run_pipeline", new=dynamic_run_pipeline),
         patch("src.service.jobs.notify_job_failed"),
     ):
         resp = client.post("/transcribe", json=body, headers=_AUTH)
         assert resp.status_code == 202
         batch_id = resp.json()["batch_id"]
-        job_id = resp.json()["job_ids"][0]
-        content_id = job_id.removeprefix("rfj_")
-
-        with patch("src.service.jobs.run_pipeline", new=_pipeline_side_effect(content_id)):
-            _wait_for_batch_completion(registries, batch_id, timeout=5.0)
+        _wait_for_batch_completion(registries, batch_id, timeout=5.0)
 
     # Three HTTP calls: GET input, PUT transcript, PUT summary.
     methods_and_urls = [(r["method"], r["url"].split("?")[0]) for r in captured["requests"]]
