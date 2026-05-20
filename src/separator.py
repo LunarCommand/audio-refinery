@@ -141,7 +141,12 @@ def separate(
     started_at = datetime.now(UTC)
     t0 = time.monotonic()
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # Force UTF-8 decoding with `errors="replace"` so Demucs's tqdm progress
+    # bars (and any other Unicode in its stderr) don't crash subprocess.run on
+    # hosts whose locale resolves to ASCII. The actual separation work has
+    # already completed by the time we read stdout/stderr — losing a few
+    # progress-bar characters to U+FFFD is harmless.
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     processing_time = time.monotonic() - t0
     completed_at = datetime.now(UTC)
