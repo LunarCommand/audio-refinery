@@ -101,16 +101,24 @@ audio-refinery/
 │   ├── gpu_utils.py           # GPU queries via nvidia-smi
 │   ├── notifier.py            # Slack webhook notifications
 │   ├── gpu_tflops.toml        # GPU performance lookup table
-│   └── models/                # Pydantic output models
-│       ├── audio.py           # AudioFileInfo, SeparationResult
-│       ├── diarization.py     # DiarizationResult, SpeakerSegment
-│       ├── transcription.py   # TranscriptionResult, TranscriptSegment, WordSegment
-│       └── sentiment.py       # SentimentResult, SegmentSentiment, SentimentScore
+│   ├── models/                # Pydantic output models
+│   │   ├── audio.py           # AudioFileInfo, SeparationResult
+│   │   ├── diarization.py     # DiarizationResult, SpeakerSegment
+│   │   ├── transcription.py   # TranscriptionResult, TranscriptSegment, WordSegment
+│   │   └── sentiment.py       # SentimentResult, SegmentSentiment, SentimentScore
+│   └── service/               # HTTP service mode (parallel to CLI; same pipeline core)
+│       ├── app.py             # FastAPI app, `audio-refinery-service` entrypoint
+│       ├── auth.py            # Bearer-token middleware
+│       ├── jobs.py            # Job registry, queue, background-thread worker
+│       ├── lifecycle.py       # Model warmup, readiness state, pre-loaded handles
+│       ├── transcript.py      # Combined transcript schema, error sidecar payload
+│       └── uri_io.py          # URI fetch/upload (https://, file://)
 ├── tests/                      # Test suite
 │   ├── conftest.py            # Shared fixtures and GPU mock
 │   ├── test_*.py              # Unit tests
 │   ├── test_integration.py    # GPU-required integration tests
-│   └── models/                # Pydantic model validation tests
+│   ├── models/                # Pydantic model validation tests
+│   └── service/               # Service-mode unit/integration tests
 ├── docs/
 │   └── DEVELOPMENT.md         # This file
 ├── .github/
