@@ -752,8 +752,8 @@ def sentiment_cmd(transcription_file: str, model: str, device: str, output_file:
     default=None,
     hidden=True,
     help=(
-        "Override the Demucs scratch directory. When set, the RAM disk check and "
-        "interactive prompt are skipped entirely. Used internally by pipeline-parallel."
+        "Override the Demucs scratch directory. Used internally by pipeline-parallel; "
+        "operators normally set REFINERY_SCRATCH_DIR instead."
     ),
 )
 @click.option(
@@ -831,9 +831,9 @@ def pipeline(
 
     Each file is carried through all active stages (separation → diarization →
     transcription) before moving to the next file. All models are loaded once at
-    startup. Ghost-track stems are cleaned up from the RAM disk as soon as they
-    are no longer needed, keeping scratch-disk usage bounded to roughly one file
-    at a time regardless of how many files are in the run.
+    startup. Ghost-track stems are cleaned up from the scratch directory as soon
+    as they are no longer needed, keeping disk usage bounded to roughly one
+    file at a time regardless of how many files are in the run.
 
     Steps 5 (--emotion, Speech Emotion Recognition) and 6 (--events, Audio Event
     Detection via CLAP) are scaffolded but not yet implemented.
@@ -845,9 +845,10 @@ def pipeline(
       <base>/sentiment/     — sentiment JSON files (created if --sentiment is set)
       <base>/summary/       — pipeline run summary (created if absent)
 
-    Demucs scratch (priority order):
-      /mnt/fast_scratch/demucs  — RAM disk (used automatically if mounted)
-      <base>/demucs             — disk fallback (requires confirmation)
+    Demucs scratch resolves to $REFINERY_SCRATCH_DIR/demucs when set, or
+    tempfile.gettempdir()/audio-refinery-demucs otherwise. Point the env var
+    at a tmpfs mount for the RAM-backed throughput benefit, or override
+    per-invocation with --demucs-output-dir.
     """
     from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
@@ -1556,7 +1557,7 @@ def pipeline_parallel(
         return cmd
 
     # ── Print launch summary ────────────────────────────────────────────────
-    scratch_suffix = "(RAM disk)" if demucs_on_ramdisk else "(disk)"
+    scratch_suffix = "(RAM-backed)" if demucs_on_ramdisk else "(disk-backed)"
     tflops_table = load_tflops_table()
 
     def _gpu_stat_line(gpu_device: str) -> str:
