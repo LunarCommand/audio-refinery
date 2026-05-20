@@ -1,4 +1,6 @@
-"""Tests for `src.service.transcript`.
+"""Tests for the service-mode schemas (`src.service.schemas`) and the
+schema-assembly factories that live alongside the worker in
+`src.service.jobs`.
 
 Covers:
 - CombinedTranscript assembly with and without sentiment
@@ -29,14 +31,13 @@ from src.models.transcription import (
     TranscriptSegment,
     WordSegment,
 )
-from src.service.transcript import (
+from src.service.jobs import build_combined, build_summary
+from src.service.schemas import (
     BATCH_SUMMARY_SCHEMA_VERSION,
     TRANSCRIPT_SCHEMA_VERSION,
     BatchSummary,
     CombinedTranscript,
     JobSummaryEntry,
-    build_combined,
-    build_summary,
 )
 
 # ---------------------------------------------------------------------------

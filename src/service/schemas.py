@@ -6,6 +6,11 @@ summary per accepted batch. The schemas live here rather than in
 ``src/models/`` because they are a service-layer concern, not a stage output;
 the CLI continues to emit the per-stage JSONs directly.
 
+Pure data — no behavior. Factories that assemble these documents from the
+existing per-stage results live in :mod:`src.service.jobs` alongside the
+worker that calls them, matching the project convention that data models
+are separate from the modules that use them.
+
 Schema versioning is independent per document type. Both schemas start at
 v1.0.0 in this release. They are expected to bump (the transcript shape will
 change when v0.3.0 alignment lands and splits aligned words into a separate
@@ -15,8 +20,6 @@ array). Consumers MUST key off ``schema_version`` to handle evolution.
 from __future__ import annotations
 
 from datetime import datetime
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -28,14 +31,6 @@ from src.models.transcription import TranscriptionResult
 
 TRANSCRIPT_SCHEMA_VERSION = "1.0.0"
 BATCH_SUMMARY_SCHEMA_VERSION = "1.0.0"
-
-
-def _audio_refinery_version() -> str:
-    """Return the installed audio-refinery package version, or 'unknown' if not packaged."""
-    try:
-        return _pkg_version("audio-refinery")
-    except PackageNotFoundError:
-        return "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -59,46 +54,6 @@ class CombinedTranscript(BaseModel):
     transcription: TranscriptionResult = Field(description="Full WhisperX transcription result.")
     sentiment: SentimentResult | None = Field(default=None, description="Sentiment result, present only when enabled.")
     model_versions: dict[str, str] = Field(description="Per-stage model identifiers for quick lookup.")
-
-
-def build_combined(
-    diarization: DiarizationResult,
-    transcription: TranscriptionResult,
-    sentiment: SentimentResult | None = None,
-    *,
-    processed_at: datetime | None = None,
-) -> CombinedTranscript:
-    """Assemble a ``CombinedTranscript`` from the existing per-stage results.
-
-    Args:
-        diarization: The diarization stage output. Its ``input_info`` is
-            used as the canonical audio metadata for the combined document
-            (all three stages process the same file, so any of their
-            ``input_info`` fields would do).
-        transcription: The transcription stage output.
-        sentiment: The sentiment stage output, when enabled.
-        processed_at: Override for the assembly timestamp. Useful in tests;
-            defaults to ``datetime.now()`` when omitted.
-
-    Returns:
-        A populated ``CombinedTranscript`` ready to JSON-serialize and upload.
-    """
-    model_versions = {
-        "diarization": diarization.model_name,
-        "transcription": transcription.model_name,
-    }
-    if sentiment is not None:
-        model_versions["sentiment"] = sentiment.model_name
-
-    return CombinedTranscript(
-        audio_refinery_version=_audio_refinery_version(),
-        processed_at=processed_at if processed_at is not None else datetime.now(),
-        audio=diarization.input_info,
-        diarization=diarization,
-        transcription=transcription,
-        sentiment=sentiment,
-        model_versions=model_versions,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -169,40 +124,6 @@ class BatchSummary(BaseModel):
     totals: BatchTotals
 
 
-def build_summary(
-    batch_id: str,
-    submitted_at: datetime,
-    completed_at: datetime,
-    jobs: list[JobSummaryEntry],
-) -> BatchSummary:
-    """Assemble a ``BatchSummary`` from terminal per-job records.
-
-    Callers are responsible for constructing ``JobSummaryEntry`` instances
-    from their internal job state. Totals are derived from the entries to
-    avoid the caller having to track them separately.
-
-    Args:
-        batch_id: The batch identifier returned to the caller in the
-            ``POST /transcribe`` response (e.g. ``"btc_..."``).
-        submitted_at: When the batch was accepted by the service.
-        completed_at: When the final job in the batch reached a terminal
-            state.
-        jobs: Per-job terminal entries in submission order.
-
-    Returns:
-        A populated ``BatchSummary`` ready to JSON-serialize and upload.
-    """
-    completed = sum(1 for j in jobs if j.status == "completed")
-    failed = sum(1 for j in jobs if j.status == "failed")
-    return BatchSummary(
-        batch_id=batch_id,
-        submitted_at=submitted_at,
-        completed_at=completed_at,
-        jobs=jobs,
-        totals=BatchTotals(submitted=len(jobs), completed=completed, failed=failed),
-    )
-
-
 __all__ = [
     "BATCH_SUMMARY_SCHEMA_VERSION",
     "TRANSCRIPT_SCHEMA_VERSION",
@@ -212,6 +133,4 @@ __all__ = [
     "JobFailureStage",
     "JobStatus",
     "JobSummaryEntry",
-    "build_combined",
-    "build_summary",
 ]

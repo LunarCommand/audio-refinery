@@ -111,7 +111,7 @@ audio-refinery/
 │       ├── auth.py            # Bearer-token middleware
 │       ├── jobs.py            # Job registry, queue, background-thread worker
 │       ├── lifecycle.py       # Model warmup, readiness state, pre-loaded handles
-│       ├── transcript.py      # Combined transcript schema, error sidecar payload
+│       ├── schemas.py         # Combined transcript + batch summary Pydantic schemas
 │       └── uri_io.py          # URI fetch/upload (https://, file://)
 ├── tests/                      # Test suite
 │   ├── conftest.py            # Shared fixtures and GPU mock
