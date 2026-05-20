@@ -22,6 +22,10 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.service.lifecycle import PipelineHandles
 
 try:
     import torch as _torch
@@ -576,6 +580,7 @@ def run_pipeline(
     on_progress: PipelineProgressCallback | None = None,
     manifest: list[str] | None = None,
     whisper_model: str = TRANSCRIBER_DEFAULT_MODEL,
+    model_handles: PipelineHandles | None = None,
 ) -> PipelineResult:
     """Run the full pipeline on all WAV files in source_dir, interleaved per file.
 
@@ -616,6 +621,14 @@ def run_pipeline(
             Used by ``pipeline-parallel`` to assign disjoint file sets to each worker.
         whisper_model: WhisperX model name (e.g. ``"large-v3"``, ``"distil-large-v3"``).
             Defaults to :data:`TRANSCRIBER_DEFAULT_MODEL`.
+        model_handles: Pre-loaded model handles supplied by the service mode
+            (``src/service/lifecycle.py::PipelineHandles``). When supplied the
+            pipeline reuses the caller's pyannote / WhisperX / sentiment handles
+            and skips its own per-call load entirely — the warm-models lifecycle
+            that service mode depends on for sub-second ``202 Accepted`` UX.
+            When ``None`` (the default — CLI mode), the existing self-managed
+            load path runs unchanged. None of the load-error short-circuit
+            behavior changes; supplied handles are assumed valid.
 
     Returns:
         PipelineResult with per-stage outcomes and total wall-clock runtime.
@@ -666,13 +679,18 @@ def run_pipeline(
     # Text-only; independent of audio model availability. Loaded before the
     # early-return check, so a sentiment-only run (all audio done, sentiment
     # pending) falls through to Pass 3 rather than returning early.
+    # Service mode supplies a pre-loaded handle via model_handles and skips
+    # this per-call load.
     sentiment_pipeline_obj = None
     sentiment_load_error: str | None = None
     if enable_sentiment:
-        try:
-            sentiment_pipeline_obj = load_sentiment_pipeline(DEFAULT_SENTIMENT_MODEL, "cpu")
-        except SentimentError as exc:
-            sentiment_load_error = str(exc)
+        if model_handles is not None and model_handles.sentiment is not None:
+            sentiment_pipeline_obj = model_handles.sentiment
+        else:
+            try:
+                sentiment_pipeline_obj = load_sentiment_pipeline(DEFAULT_SENTIMENT_MODEL, "cpu")
+            except SentimentError as exc:
+                sentiment_load_error = str(exc)
 
     # Build a lookup so on_progress can report the file's position within the full
     # discovered list (not just within the pending subset).
@@ -685,27 +703,35 @@ def run_pipeline(
 
     if pending:
         # ── Load audio models once for all pending files ───────────────────
+        # Service mode supplies pre-loaded handles via model_handles and skips
+        # this per-call load entirely; CLI mode hits the existing path below.
         diar_pipeline_obj = None
         diar_load_error: str | None = None
-        try:
-            token = _resolve_hf_token(hf_token)
-            diar_pipeline_obj = load_pipeline(DIARIZER_DEFAULT_MODEL, device, token)
-        except DiarizationError as exc:
-            diar_load_error = str(exc)
+        wx_model = None
+        wx_load_error: str | None = None
 
-        wx_language = None if language == "auto" else language
-        ct2_device, ct2_device_index = _parse_whisperx_device(device)
         for _logger_name in _NOISY_LOGGERS:
             logging.getLogger(_logger_name).setLevel(logging.ERROR)
 
-        wx_model = None
-        wx_load_error: str | None = None
-        try:
-            wx_model = _load_whisperx_model(whisper_model, ct2_device, ct2_device_index, compute_type, wx_language)
-        except ImportError as exc:
-            wx_load_error = f"whisperx not installed: {exc}"
-        except Exception as exc:
-            wx_load_error = f"Failed to load WhisperX model: {exc}"
+        if model_handles is not None:
+            diar_pipeline_obj = model_handles.diarization
+            wx_model = model_handles.whisperx
+        else:
+            try:
+                token = _resolve_hf_token(hf_token)
+                diar_pipeline_obj = load_pipeline(DIARIZER_DEFAULT_MODEL, device, token)
+            except DiarizationError as exc:
+                diar_load_error = str(exc)
+
+            wx_language = None if language == "auto" else language
+            ct2_device, ct2_device_index = _parse_whisperx_device(device)
+
+            try:
+                wx_model = _load_whisperx_model(whisper_model, ct2_device, ct2_device_index, compute_type, wx_language)
+            except ImportError as exc:
+                wx_load_error = f"whisperx not installed: {exc}"
+            except Exception as exc:
+                wx_load_error = f"Failed to load WhisperX model: {exc}"
 
         # Step 5 (SER) and step 6 (CLAP) model loads will be added here when implemented.
         # ser_model = _load_ser_model(device) if enable_emotion else None

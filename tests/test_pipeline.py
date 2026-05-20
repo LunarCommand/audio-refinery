@@ -1002,3 +1002,140 @@ def test_run_pipeline_vocals_deleted_after_transcription(source_dir: Path, tmp_p
         )
 
     assert not vocals.exists()
+
+
+# ---------------------------------------------------------------------------
+# Service-mode handle injection (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_run_pipeline_uses_supplied_model_handles_and_skips_internal_load(source_dir: Path, tmp_path: Path) -> None:
+    """When the service supplies PipelineHandles, run_pipeline must reuse them
+    and skip the internal pyannote / WhisperX load calls entirely. The CLI's
+    self-managed load path is preserved by the same code, exercised by the
+    rest of the suite — this test isolates the new injection branch."""
+    from src.service.lifecycle import PipelineHandles
+
+    diar_handle = MagicMock(name="pre-loaded-pyannote")
+    wx_handle = MagicMock(name="pre-loaded-whisperx")
+    handles = PipelineHandles(diarization=diar_handle, whisperx=wx_handle, sentiment=None)
+
+    diarize_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=2.0,
+            model_dump_json=lambda **kw: "{}",
+            input_info=MagicMock(duration_seconds=10.0),
+            segments=[],
+        )
+    )
+    transcribe_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=5.0,
+            model_dump_json=lambda **kw: "{}",
+            input_info=MagicMock(duration_seconds=10.0),
+            segments=[],
+        )
+    )
+
+    with (
+        patch(
+            "src.pipeline.separate",
+            return_value=MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0)),
+        ),
+        patch("src.pipeline.load_pipeline") as load_diar,
+        patch("src.pipeline._load_whisperx_model") as load_wx,
+        patch("src.pipeline._resolve_hf_token") as resolve_token,
+        patch("src.pipeline.diarize", new=diarize_mock),
+        patch("src.pipeline.transcribe", new=transcribe_mock),
+    ):
+        result = run_pipeline(
+            source_dir=source_dir,
+            demucs_output_dir=tmp_path / "stems",
+            diarization_dir=tmp_path / "diar",
+            transcription_dir=tmp_path / "tx",
+            model_handles=handles,
+        )
+
+    # Internal loaders must NOT be called when handles are supplied.
+    load_diar.assert_not_called()
+    load_wx.assert_not_called()
+    resolve_token.assert_not_called()
+
+    # The supplied handles must be the ones forwarded into the stage calls.
+    diarize_call_kwargs = diarize_mock.call_args.kwargs
+    assert diarize_call_kwargs.get("_pipeline") is diar_handle
+    transcribe_call_kwargs = transcribe_mock.call_args.kwargs
+    assert transcribe_call_kwargs.get("_whisperx_model") is wx_handle
+
+    # Pipeline still produces outcomes for every file.
+    assert result.total_discovered == 3
+
+
+def test_run_pipeline_uses_supplied_sentiment_handle_when_sentiment_enabled(source_dir: Path, tmp_path: Path) -> None:
+    """The sentiment handle on PipelineHandles is forwarded to analyze_sentiment;
+    load_sentiment_pipeline must not be called."""
+    from src.service.lifecycle import PipelineHandles
+
+    sentiment_handle = MagicMock(name="pre-loaded-sentiment")
+    handles = PipelineHandles(
+        diarization=MagicMock(),
+        whisperx=MagicMock(),
+        sentiment=sentiment_handle,
+    )
+
+    # Mock the per-file pipeline stages so the run completes.
+    sep_mock = MagicMock(
+        return_value=MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
+    )
+    diar_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=2.0,
+            model_dump_json=lambda **kw: "{}",
+            input_info=MagicMock(duration_seconds=10.0),
+            segments=[],
+        )
+    )
+    tx_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=5.0,
+            model_dump_json=lambda **kw: "{}",
+            input_info=MagicMock(duration_seconds=10.0),
+            segments=[],
+        )
+    )
+    sent_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=0.5,
+            model_dump_json=lambda **kw: "{}",
+            segments=[],
+        )
+    )
+
+    with (
+        patch("src.pipeline.separate", new=sep_mock),
+        patch("src.pipeline.load_pipeline") as load_diar,
+        patch("src.pipeline._load_whisperx_model") as load_wx,
+        patch("src.pipeline.load_sentiment_pipeline") as load_sentiment,
+        patch("src.pipeline.diarize", new=diar_mock),
+        patch("src.pipeline.transcribe", new=tx_mock),
+        patch("src.pipeline.analyze_sentiment", new=sent_mock),
+    ):
+        run_pipeline(
+            source_dir=source_dir,
+            demucs_output_dir=tmp_path / "stems",
+            diarization_dir=tmp_path / "diar",
+            transcription_dir=tmp_path / "tx",
+            sentiment_dir=tmp_path / "sent",
+            enable_sentiment=True,
+            model_handles=handles,
+        )
+
+    # None of the loaders should have run.
+    load_diar.assert_not_called()
+    load_wx.assert_not_called()
+    load_sentiment.assert_not_called()
+
+    # The supplied sentiment handle must be the one forwarded.
+    assert sent_mock.call_count > 0
+    sent_call_kwargs = sent_mock.call_args.kwargs
+    assert sent_call_kwargs.get("_sentiment_pipeline") is sentiment_handle
