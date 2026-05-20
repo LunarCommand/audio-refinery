@@ -29,6 +29,7 @@ from src.diarizer import (
     DiarizationError,
     diarize,
 )
+from src.fs_utils import detect_fstype
 from src.gpu_utils import (
     detect_gpu_order,
     load_tflops_table,
@@ -147,58 +148,34 @@ def _fmt_time(seconds: float) -> str:
     return f"{mins}m {secs}s"
 
 
-def _mkdir_demucs(demucs_path: Path, base_path: Path, demucs_on_ramdisk: bool) -> tuple[Path, bool]:
-    """Create demucs_path, prompting for local fallback on PermissionError.
-
-    Returns (final_demucs_path, final_demucs_on_ramdisk).
-    """
-    try:
-        demucs_path.mkdir(parents=True, exist_ok=True)
-        return demucs_path, demucs_on_ramdisk
-    except PermissionError:
-        console.print(
-            Panel(
-                "[bold yellow]/mnt/fast_scratch is not writable.[/bold yellow]\n\n"
-                "The RAM disk is mounted but the current user cannot write to it.\n"
-                "Remount with open permissions:\n\n"
-                "  [dim]sudo mount -o remount,mode=1777 /mnt/fast_scratch[/dim]\n\n"
-                f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]",
-                title="[yellow bold]RAM Disk Not Writable[/yellow bold]",
-                border_style="yellow",
-            )
-        )
-        if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
-            console.print("[dim]Aborted.[/dim]")
-            sys.exit(0)
-        demucs_path = base_path / "demucs"
-        demucs_path.mkdir(parents=True, exist_ok=True)
-        return demucs_path, False
-
-
 def _resolve_demucs_scratch(base_path: Path) -> tuple[Path, bool]:
-    """Resolve the Demucs scratch directory, prompting if /mnt/fast_scratch is unavailable.
+    """Resolve the Demucs scratch directory and detect whether it's RAM-backed.
 
-    Returns (demucs_path, demucs_on_ramdisk). Exits if the user declines local fallback.
+    Resolution:
+      1. ``REFINERY_SCRATCH_DIR`` env var (shared with service mode).
+      2. ``DEFAULT_OUTPUT_DIR`` from :mod:`src.separator` (host-agnostic
+         tempfile location).
+
+    Returns ``(demucs_path, demucs_on_ramdisk)`` where ``demucs_on_ramdisk`` is
+    True when the resolved path lives on tmpfs (detected via /proc/mounts).
     """
-    fast_scratch = Path("/mnt/fast_scratch")
-    if fast_scratch.is_mount():
-        return fast_scratch / "demucs", True
-    console.print(
-        Panel(
-            "[bold yellow]/mnt/fast_scratch is not mounted.[/bold yellow]\n\n"
-            "The RAM disk is not available. Without it, Demucs scratch files will be\n"
-            "written to local storage, which is slower and increases SSD wear.\n\n"
-            f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]\n\n"
-            "To mount the RAM disk before running:\n"
-            "  [dim]sudo mount -t tmpfs -o size=32G,mode=1777 tmpfs /mnt/fast_scratch[/dim]",
-            title="[yellow bold]RAM Disk Not Available[/yellow bold]",
-            border_style="yellow",
-        )
-    )
-    if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
-        console.print("[dim]Aborted.[/dim]")
-        sys.exit(0)
-    return base_path / "demucs", False
+    env = os.getenv("REFINERY_SCRATCH_DIR")
+    path = Path(env) / "demucs" if env else DEFAULT_OUTPUT_DIR
+    is_ramdisk = detect_fstype(path) == "tmpfs"
+    return path, is_ramdisk
+
+
+def _mkdir_demucs(demucs_path: Path, base_path: Path, demucs_on_ramdisk: bool) -> tuple[Path, bool]:
+    """Create ``demucs_path``. Fails with a clear error if the path isn't writable.
+
+    Kept as a thin wrapper so the call sites stay symmetric with the previous
+    interactive-fallback version. With the workstation-specific
+    ``/mnt/fast_scratch`` default gone, the failure case is now a real
+    misconfiguration (operator pointed REFINERY_SCRATCH_DIR at an unwritable
+    path) rather than a missing RAM disk to prompt about.
+    """
+    demucs_path.mkdir(parents=True, exist_ok=True)
+    return demucs_path, demucs_on_ramdisk
 
 
 @click.group()
@@ -901,10 +878,11 @@ def pipeline(
         _warn_if_gpu_busy([device])
 
     # Resolve Demucs scratch location.
-    # --demucs-dir (set by pipeline-parallel) bypasses the interactive check entirely.
+    # --demucs-dir (set by pipeline-parallel) overrides everything; otherwise the
+    # helper picks up REFINERY_SCRATCH_DIR or falls back to the tempfile default.
     if demucs_dir is not None:
         demucs_path = Path(demucs_dir)
-        demucs_on_ramdisk = demucs_path.is_mount()
+        demucs_on_ramdisk = detect_fstype(demucs_path) == "tmpfs"
     else:
         demucs_path, demucs_on_ramdisk = _resolve_demucs_scratch(base_path)
 
@@ -935,7 +913,11 @@ def pipeline(
             )
         )
 
-    scratch_suffix = "[dim](RAM disk)[/dim]" if demucs_on_ramdisk else "[yellow](disk — RAM disk not mounted)[/yellow]"
+    scratch_suffix = (
+        "[dim](RAM-backed)[/dim]"
+        if demucs_on_ramdisk
+        else "[yellow](disk-backed — set REFINERY_SCRATCH_DIR to a tmpfs mount for faster batches)[/yellow]"
+    )
     scratch_label = f"{demucs_path} {scratch_suffix}"
 
     steps_active = "1 · Separate  2 · Diarize  3 · Transcribe"

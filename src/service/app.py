@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+from src.fs_utils import detect_fstype
 from src.service.api_schemas import (
     HealthResponse,
     JobStatusResponse,
@@ -284,44 +285,13 @@ def _resolve_scratch_location(config: ServiceConfig) -> tuple[Path, str | None]:
     """Return the resolved scratch directory plus its filesystem type (or None).
 
     Resolution: ``config.scratch_dir`` if set, otherwise the tempfile module's
-    default (``TMPDIR`` env or ``/tmp``). Filesystem type is detected on Linux
-    by reading /proc/mounts and matching the deepest mount-point prefix; on
-    other platforms returns None.
+    default (``TMPDIR`` env or ``/tmp``). Filesystem type is detected by
+    :func:`src.fs_utils.detect_fstype`; returns None on non-Linux.
     """
     import tempfile as _tempfile
 
     path = config.scratch_dir if config.scratch_dir is not None else Path(_tempfile.gettempdir())
-    return path, _detect_fstype(path)
-
-
-def _detect_fstype(path: Path) -> str | None:
-    """Detect the filesystem type of ``path`` on Linux. Returns None on
-    non-Linux or when /proc/mounts is unreadable."""
-    try:
-        with open("/proc/mounts") as f:
-            entries = [line.split() for line in f if line.strip()]
-    except OSError:
-        return None
-
-    try:
-        target = path.resolve()
-    except OSError:
-        return None
-
-    best: tuple[Path, str] | None = None
-    for parts in entries:
-        if len(parts) < 3:
-            continue
-        try:
-            mountpoint = Path(parts[1]).resolve()
-        except OSError:
-            continue
-        fstype = parts[2]
-        is_match = mountpoint == target or mountpoint in target.parents
-        is_deeper = best is None or len(str(mountpoint)) > len(str(best[0]))
-        if is_match and is_deeper:
-            best = (mountpoint, fstype)
-    return best[1] if best is not None else None
+    return path, detect_fstype(path)
 
 
 # ---------------------------------------------------------------------------
