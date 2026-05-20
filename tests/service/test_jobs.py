@@ -24,6 +24,7 @@ from src.service.jobs import (
     JobQueue,
     JobRegistry,
     Registries,
+    RetentionSweeper,
     Worker,
     finalize_batch,
     make_batch_id,
@@ -742,3 +743,160 @@ def test_worker_stop_terminates_thread() -> None:
     worker.start()
     worker.stop(timeout=1.0)
     assert worker._thread is None or not worker._thread.is_alive()
+
+
+# ---------------------------------------------------------------------------
+# RetentionSweeper
+# ---------------------------------------------------------------------------
+
+
+from datetime import timedelta  # noqa: E402
+
+
+def _terminal_completed_job(job_id: str, completed_at: datetime) -> Job:
+    return Job(
+        job_id=job_id,
+        batch_id="btc_x",
+        input_uri="file:///x.wav",
+        output_uri="file:///x.json",
+        status="completed",
+        started_at=completed_at,
+        completed_at=completed_at,
+        duration_seconds=60.0,
+    )
+
+
+def _terminal_failed_job(job_id: str, failed_at: datetime) -> Job:
+    return Job(
+        job_id=job_id,
+        batch_id="btc_x",
+        input_uri="file:///x.wav",
+        output_uri="file:///x.json",
+        status="failed",
+        started_at=failed_at,
+        failed_at=failed_at,
+        stage="transcribe",
+        error="boom",
+        retryable=False,
+    )
+
+
+def test_retention_sweep_evicts_terminal_jobs_older_than_window():
+    registries = Registries()
+    config = ServiceConfig(job_retention_seconds=3600)
+
+    now = datetime.now()
+    old_completed = _terminal_completed_job("rfj_old1", now - timedelta(hours=2))
+    old_failed = _terminal_failed_job("rfj_old2", now - timedelta(hours=2))
+    fresh = _terminal_completed_job("rfj_fresh", now - timedelta(minutes=5))
+    pending = Job(
+        job_id="rfj_pending",
+        batch_id="btc_x",
+        input_uri="file:///x",
+        output_uri="file:///y",
+        status="processing",
+        started_at=now,  # no terminal timestamp
+    )
+    for j in (old_completed, old_failed, fresh, pending):
+        registries.jobs.add(j)
+
+    sweeper = RetentionSweeper(registries, config)
+    evicted_jobs, evicted_batches = sweeper.sweep_once()
+
+    assert evicted_jobs == 2
+    assert evicted_batches == 0
+    assert registries.jobs.get("rfj_old1") is None
+    assert registries.jobs.get("rfj_old2") is None
+    assert registries.jobs.get("rfj_fresh") is not None
+    assert registries.jobs.get("rfj_pending") is not None
+
+
+def test_retention_sweep_evicts_terminal_batches_older_than_window():
+    registries = Registries()
+    config = ServiceConfig(job_retention_seconds=3600)
+
+    now = datetime.now()
+    old_batch = Batch(batch_id="btc_old", summary_uri="x", job_ids=[])
+    old_batch.completed_at = now - timedelta(hours=2)
+    fresh_batch = Batch(batch_id="btc_fresh", summary_uri="x", job_ids=[])
+    fresh_batch.completed_at = now - timedelta(minutes=5)
+    in_flight = Batch(batch_id="btc_inflight", summary_uri="x", job_ids=[])
+    # no completed_at — still in-flight
+    for b in (old_batch, fresh_batch, in_flight):
+        registries.batches.add(b)
+
+    sweeper = RetentionSweeper(registries, config)
+    evicted_jobs, evicted_batches = sweeper.sweep_once()
+
+    # Only the old batch (>1h ago) is evicted. The fresh one (5 min ago) is
+    # newer than the cutoff and stays. The in-flight one has no completed_at
+    # so it's never eligible.
+    assert evicted_jobs == 0
+    assert evicted_batches == 1
+    assert registries.batches.get("btc_old") is None
+    assert registries.batches.get("btc_fresh") is not None
+    assert registries.batches.get("btc_inflight") is not None
+
+
+def test_retention_sweep_handles_empty_registries():
+    registries = Registries()
+    config = ServiceConfig(job_retention_seconds=3600)
+    sweeper = RetentionSweeper(registries, config)
+    assert sweeper.sweep_once() == (0, 0)
+
+
+def test_retention_sweeper_thread_lifecycle():
+    registries = Registries()
+    config = ServiceConfig(job_retention_seconds=3600)
+    sweeper = RetentionSweeper(registries, config, tick_seconds=0.05)
+    sweeper.start()
+    time.sleep(0.02)
+    assert sweeper._thread is not None
+    assert sweeper._thread.is_alive()
+    sweeper.stop(timeout=1.0)
+    assert not sweeper._thread.is_alive()
+
+
+def test_retention_sweeper_runs_sweep_once_per_tick():
+    """Plant an old job, start the sweeper with a fast tick, and verify the job
+    is evicted within a couple of tick periods."""
+    registries = Registries()
+    config = ServiceConfig(job_retention_seconds=1)  # 1 second retention
+
+    # Job is already 5 seconds old → eligible for eviction.
+    registries.jobs.add(_terminal_completed_job("rfj_old", datetime.now() - timedelta(seconds=5)))
+
+    sweeper = RetentionSweeper(registries, config, tick_seconds=0.05)
+    sweeper.start()
+    # Initial wait is one tick, then sweep_once runs.
+    for _ in range(40):
+        if registries.jobs.get("rfj_old") is None:
+            break
+        time.sleep(0.05)
+    sweeper.stop(timeout=1.0)
+
+    assert registries.jobs.get("rfj_old") is None
+
+
+def test_retention_sweeper_continues_after_sweep_error():
+    """If sweep_once raises, the daemon thread must keep ticking."""
+    registries = Registries()
+    config = ServiceConfig(job_retention_seconds=1)
+    sweeper = RetentionSweeper(registries, config, tick_seconds=0.02)
+
+    call_count = {"n": 0}
+    original = sweeper.sweep_once
+
+    def flaky() -> tuple[int, int]:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("first sweep blew up")
+        return original()
+
+    sweeper.sweep_once = flaky  # type: ignore[method-assign]
+    sweeper.start()
+    # Wait long enough for several ticks (each ~20ms).
+    time.sleep(0.2)
+    sweeper.stop(timeout=1.0)
+
+    assert call_count["n"] >= 2, f"sweeper died after first error; only {call_count['n']} calls"

@@ -15,7 +15,7 @@ import shutil
 import tempfile
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -657,6 +657,87 @@ class Worker:
             finalize_batch(job.batch_id, self._registries)
 
 
+# ---------------------------------------------------------------------------
+# RetentionSweeper — periodically evicts old terminal Job and Batch records
+# ---------------------------------------------------------------------------
+
+
+class RetentionSweeper:
+    """Background daemon that periodically evicts terminal records older than
+    ``config.job_retention_seconds`` from both registries.
+
+    After eviction ``GET /jobs/{id}`` returns 404 for the old id, matching the
+    integration contract ("absence is not a contract violation"). The
+    orchestrator already has the per-batch summary at that point, so per-job
+    state is no longer needed.
+
+    The sweep is best-effort: an exception during a single tick logs a
+    warning and the loop continues. The thread never dies on its own.
+    """
+
+    def __init__(
+        self,
+        registries: Registries,
+        config: ServiceConfig,
+        *,
+        tick_seconds: float = 60.0,
+    ) -> None:
+        self._registries = registries
+        self._config = config
+        self._tick = tick_seconds
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._log = structlog.get_logger(__name__)
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="rfj-retention")
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+
+    def _run(self) -> None:
+        # Initial wait so a freshly-started service doesn't immediately sweep.
+        if self._stop.wait(self._tick):
+            return
+        while not self._stop.is_set():
+            try:
+                self.sweep_once()
+            except Exception as exc:  # noqa: BLE001 — never die
+                self._log.warning("retention.sweep_error", error=repr(exc))
+            if self._stop.wait(self._tick):
+                return
+
+    def sweep_once(self) -> tuple[int, int]:
+        """Evict terminal records older than the retention window.
+
+        Returns ``(evicted_jobs, evicted_batches)``. Exposed for tests and
+        operators (e.g., an admin endpoint can call this directly).
+        """
+        cutoff = datetime.now() - timedelta(seconds=self._config.job_retention_seconds)
+        evicted_jobs = 0
+        for job in self._registries.jobs.all_jobs():
+            terminal_ts = job.completed_at or job.failed_at
+            if terminal_ts is not None and terminal_ts < cutoff and self._registries.jobs.delete(job.job_id):
+                evicted_jobs += 1
+        evicted_batches = 0
+        for batch in self._registries.batches.all_batches():
+            if (
+                batch.completed_at is not None
+                and batch.completed_at < cutoff
+                and self._registries.batches.delete(batch.batch_id)
+            ):
+                evicted_batches += 1
+        if evicted_jobs or evicted_batches:
+            self._log.info("retention.swept", jobs=evicted_jobs, batches=evicted_batches)
+        return evicted_jobs, evicted_batches
+
+
 __all__ = [
     "Batch",
     "BatchRegistry",
@@ -664,8 +745,12 @@ __all__ = [
     "JobQueue",
     "JobRegistry",
     "Registries",
+    "RetentionSweeper",
+    "Worker",
     "build_combined",
     "build_summary",
+    "finalize_batch",
     "make_batch_id",
     "make_job_id",
+    "process_job",
 ]
