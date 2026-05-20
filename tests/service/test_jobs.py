@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.pipeline import FileOutcome, PipelineResult, StageResult
+from src.service.config import PipelineHandles, ServiceConfig
 from src.service.jobs import (
     Batch,
     BatchRegistry,
@@ -31,7 +32,6 @@ from src.service.jobs import (
     make_job_id,
     process_job,
 )
-from src.service.lifecycle import PipelineHandles, ServiceConfig
 
 # ---------------------------------------------------------------------------
 # ID helpers

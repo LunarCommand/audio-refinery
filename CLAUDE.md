@@ -43,6 +43,8 @@ audio-refinery/
 │       ├── auth.py            # Bearer-token middleware + allowlist
 │       ├── jobs.py            # Job registry, FIFO queue, background-thread worker
 │       ├── lifecycle.py       # Model warmup, readiness state, pre-loaded handles
+│       ├── api_schemas.py     # HTTP transport schemas (request/response Pydantic models)
+│       ├── config.py          # ServiceConfig + PipelineHandles (pure data)
 │       ├── schemas.py         # Combined transcript + batch summary Pydantic schemas (v1.0.0)
 │       └── uri_io.py          # URI fetch/upload (https://, file://)
 ├── tests/                      # Test suite

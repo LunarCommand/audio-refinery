@@ -37,6 +37,7 @@ from src.service.auth import (
     load_allowlist_from_env,
     make_bearer_dependency,
 )
+from src.service.config import PipelineHandles, ServiceConfig
 from src.service.jobs import (
     Batch,
     Job,
@@ -47,8 +48,6 @@ from src.service.jobs import (
     make_job_id,
 )
 from src.service.lifecycle import (
-    PipelineHandles,
-    ServiceConfig,
     ServiceReadiness,
     WarmupError,
     default_thermal_trip,

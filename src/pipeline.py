@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.service.lifecycle import PipelineHandles
+    from src.service.config import PipelineHandles
 
 try:
     import torch as _torch

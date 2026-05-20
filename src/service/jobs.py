@@ -27,7 +27,7 @@ from src.models.sentiment import SentimentResult
 from src.models.transcription import TranscriptionResult
 from src.notifier import notify_job_failed
 from src.pipeline import PipelineResult, run_pipeline
-from src.service.lifecycle import PipelineHandles, ServiceConfig
+from src.service.config import PipelineHandles, ServiceConfig
 from src.service.schemas import (
     BatchSummary,
     BatchTotals,

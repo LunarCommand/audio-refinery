@@ -13,8 +13,9 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 from src.service.app import create_app
+from src.service.config import PipelineHandles, ServiceConfig
 from src.service.jobs import Job, Registries
-from src.service.lifecycle import PipelineHandles, ServiceConfig, ServiceReadiness
+from src.service.lifecycle import ServiceReadiness
 
 # ---------------------------------------------------------------------------
 # Test helpers

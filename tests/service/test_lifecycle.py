@@ -14,9 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.service.config import PipelineHandles, ServiceConfig
 from src.service.lifecycle import (
-    PipelineHandles,
-    ServiceConfig,
     ServiceReadiness,
     WarmupError,
     default_thermal_trip,

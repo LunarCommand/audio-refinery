@@ -1014,7 +1014,7 @@ def test_run_pipeline_uses_supplied_model_handles_and_skips_internal_load(source
     and skip the internal pyannote / WhisperX load calls entirely. The CLI's
     self-managed load path is preserved by the same code, exercised by the
     rest of the suite — this test isolates the new injection branch."""
-    from src.service.lifecycle import PipelineHandles
+    from src.service.config import PipelineHandles
 
     diar_handle = MagicMock(name="pre-loaded-pyannote")
     wx_handle = MagicMock(name="pre-loaded-whisperx")
@@ -1074,7 +1074,7 @@ def test_run_pipeline_uses_supplied_model_handles_and_skips_internal_load(source
 def test_run_pipeline_uses_supplied_sentiment_handle_when_sentiment_enabled(source_dir: Path, tmp_path: Path) -> None:
     """The sentiment handle on PipelineHandles is forwarded to analyze_sentiment;
     load_sentiment_pipeline must not be called."""
-    from src.service.lifecycle import PipelineHandles
+    from src.service.config import PipelineHandles
 
     sentiment_handle = MagicMock(name="pre-loaded-sentiment")
     handles = PipelineHandles(

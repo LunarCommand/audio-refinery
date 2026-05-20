@@ -1,4 +1,4 @@
-"""Service-mode model lifecycle: pre-loaded handles, warmup, readiness, thermal guard.
+"""Service-mode model lifecycle: warmup, readiness, thermal guard.
 
 In CLI mode the pipeline loads pyannote, WhisperX, and (optionally) sentiment
 once per ``run_pipeline()`` invocation. The service runs as a long-lived
@@ -6,12 +6,16 @@ container with serial job processing, so paying that load cost on every job
 would push first-byte latency to ~10 seconds and defeat the ``202 Accepted``
 contract.
 
-This module owns the alternative: load every in-process GPU model once at
-container startup, store handles in a ``PipelineHandles`` dataclass, and pass
-that handle bundle into ``run_pipeline()`` for the duration of the container's
-lifetime. The existing per-call load functions (`diarizer.load_pipeline`,
-``transcriber.load_whisperx_model``, ``sentiment_analyzer.load_sentiment_pipeline``)
-are reused as-is — service mode is additive, the CLI's lifecycle is unchanged.
+This module owns the alternative: ``warm_up(config)`` loads every in-process
+GPU model once at container startup and returns a ``PipelineHandles`` bundle
+(defined in :mod:`src.service.config`) that gets passed into ``run_pipeline()``
+for the duration of the container's lifetime. The existing per-call load
+functions (`diarizer.load_pipeline`, ``transcriber._load_whisperx_model``,
+``sentiment_analyzer.load_sentiment_pipeline``) are reused as-is — service
+mode is additive, the CLI's lifecycle is unchanged.
+
+Pure data lives in :mod:`src.service.config` (``ServiceConfig``,
+``PipelineHandles``); this module holds only the behavior that consumes it.
 """
 
 from __future__ import annotations
@@ -20,86 +24,21 @@ import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from src.diarizer import DiarizationError, load_pipeline
 from src.gpu_utils import query_gpu_temperature
 from src.notifier import notify_thermal_shutdown
-from src.pipeline import (
-    DEFAULT_BATCH_SIZE,
-    DEFAULT_COMPUTE_TYPE,
-    DEFAULT_DEVICE,
-    DEFAULT_LANGUAGE,
-    DEFAULT_SENTIMENT_MODEL,
-    DIARIZER_DEFAULT_MODEL,
-    TRANSCRIBER_DEFAULT_MODEL,
-    _load_whisperx_model,
-    _parse_whisperx_device,
-)
+from src.pipeline import _load_whisperx_model, _parse_whisperx_device
 from src.sentiment_analyzer import load_sentiment_pipeline
+from src.service.config import PipelineHandles, ServiceConfig
 
 ReadyState = Literal["loading", "ready", "failed"]
 
 
 # ---------------------------------------------------------------------------
-# Configuration and handles
+# Lifecycle behavior (data lives in src.service.config)
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ServiceConfig:
-    """Container-startup configuration. Resolved from env vars in app.py.
-
-    Worker / queue / retention fields:
-        ``intermediate_dir`` — when set (from ``REFINERY_INTERMEDIATE_DIR``),
-            the worker copies per-stage JSONs to ``<dir>/<job_id>/`` after each
-            successful job. Debugging-only; off by default.
-        ``max_queue_size`` — JobQueue cap from ``REFINERY_MAX_QUEUE_SIZE``.
-            Default 100. Over-limit POSTs return 429.
-        ``job_retention_seconds`` — retention window for terminal jobs/batches
-            from ``REFINERY_JOB_RETENTION_SECONDS``. Default 3600 (1 hour after
-            ``completed_at`` / ``failed_at``).
-
-    Thermal-guard fields:
-        ``gpu_temp_limit_celsius`` — °C threshold from ``REFINERY_GPU_TEMP_LIMIT``.
-            ``0`` (default) disables the guard entirely. Any positive value spawns
-            the daemon thread at lifespan startup.
-        ``gpu_temp_poll_seconds`` — how often the guard polls nvidia-smi, from
-            ``REFINERY_GPU_TEMP_POLL_SECONDS``. Default ``5.0`` matches the CLI's
-            ``_run_temp_guard`` cadence. Tune higher on shared hosts where
-            nvidia-smi polling is expensive.
-    """
-
-    device: str = DEFAULT_DEVICE
-    whisper_model: str = TRANSCRIBER_DEFAULT_MODEL
-    compute_type: str = DEFAULT_COMPUTE_TYPE
-    batch_size: int = DEFAULT_BATCH_SIZE
-    language: str = DEFAULT_LANGUAGE
-    diarizer_model: str = DIARIZER_DEFAULT_MODEL
-    sentiment_model: str = DEFAULT_SENTIMENT_MODEL
-    sentiment_enabled: bool = False
-    hf_token: str = ""
-    intermediate_dir: Path | None = None
-    max_queue_size: int = 100
-    max_batch_size: int = 25
-    job_retention_seconds: int = 3600
-    gpu_temp_limit_celsius: int = 0
-    gpu_temp_poll_seconds: float = 5.0
-
-
-@dataclass
-class PipelineHandles:
-    """Pre-loaded model handles passed into ``run_pipeline()`` by the service.
-
-    The pipeline reads attributes on this bundle when a non-None ``model_handles``
-    parameter is supplied. CLI mode never constructs one — it sticks with the
-    existing per-call load path.
-    """
-
-    diarization: Any
-    whisperx: Any
-    sentiment: Any | None = None
 
 
 class WarmupError(RuntimeError):
