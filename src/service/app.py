@@ -18,16 +18,20 @@ import os
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+from src.service.api_schemas import (
+    HealthResponse,
+    JobStatusResponse,
+    TranscribeRequest,
+    TranscribeResponse,
+)
 from src.service.auth import (
     AllowlistError,
     load_allowlist_from_env,
@@ -51,72 +55,8 @@ from src.service.lifecycle import (
     start_thermal_guard_from_config,
     warm_up,
 )
-from src.service.uri_io import UnsupportedScheme, validate_scheme
 
 logger = structlog.get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Pydantic request / response models
-# ---------------------------------------------------------------------------
-
-
-def _validate_uri(value: str) -> str:
-    try:
-        validate_scheme(value)
-    except UnsupportedScheme as exc:
-        raise ValueError(str(exc)) from exc
-    return value
-
-
-class JobRequest(BaseModel):
-    """One job inside a ``POST /transcribe`` request."""
-
-    input_uri: str = Field(min_length=1)
-    output_uri: str = Field(min_length=1)
-
-    @field_validator("input_uri", "output_uri")
-    @classmethod
-    def _check_scheme(cls, v: str) -> str:
-        return _validate_uri(v)
-
-
-class TranscribeRequest(BaseModel):
-    """Body of ``POST /transcribe``. One ``summary_uri`` per batch."""
-
-    summary_uri: str = Field(min_length=1)
-    jobs: list[JobRequest] = Field(min_length=1)
-
-    @field_validator("summary_uri")
-    @classmethod
-    def _check_summary_scheme(cls, v: str) -> str:
-        return _validate_uri(v)
-
-
-class TranscribeResponse(BaseModel):
-    batch_id: str
-    job_ids: list[str]
-
-
-class JobStatusResponse(BaseModel):
-    job_id: str
-    batch_id: str
-    status: str
-    input_uri: str
-    output_uri: str
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
-    failed_at: datetime | None = None
-    stage: str | None = None
-    error: str | None = None
-    retryable: bool | None = None
-    duration_seconds: float | None = None
-
-
-class HealthResponse(BaseModel):
-    status: str  # "ok" | "loading" | "failed"
-    stage: str | None = None
-    detail: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -464,11 +404,6 @@ def run() -> None:
 
 
 __all__ = [
-    "HealthResponse",
-    "JobRequest",
-    "JobStatusResponse",
-    "TranscribeRequest",
-    "TranscribeResponse",
     "create_app",
     "run",
 ]
