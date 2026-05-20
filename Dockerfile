@@ -19,9 +19,17 @@ RUN useradd -m -u 1000 refinery
 WORKDIR /app
 USER refinery
 
-# Install uv into the refinery user's PATH
+# Install uv into the refinery user's PATH. The pip running this command is
+# python3-pip (the apt-installed Ubuntu default — python3.10 on jammy), but
+# uv itself is a Rust binary and doesn't care which Python installed it.
 RUN pip install --user uv
 ENV PATH="/home/refinery/.local/bin:${PATH}"
+
+# Make every `uv pip install` use python3.11 regardless of which `python3`
+# the OS defaults to. The base image's `python3` is 3.10; without this, uv's
+# `--system` flag would resolve to 3.10 and fail dependency resolution
+# (pyproject.toml pins requires-python = ">=3.11,<3.12").
+ENV UV_PYTHON=python3.11
 
 # Copy and install the package (resolves main deps; may pull CPU-only torch)
 COPY --chown=refinery:refinery . .
