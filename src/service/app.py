@@ -143,7 +143,10 @@ def create_app(
             # serve /health (returns 503 with "loading" until warmup completes).
             threading.Thread(target=_run_warmup, args=(app, config, registries, readiness), daemon=True).start()
         elif handles is not None:
-            # Test path: handles already supplied. Start worker + sweeper synchronously.
+            # Test path: handles already supplied. Mark readiness ready since
+            # warm_up (which normally does this) is being skipped; otherwise
+            # the readiness gate on /transcribe would reject every request.
+            readiness.mark_ready()
             _start_background_workers(app, config, registries, readiness, handles)
 
         try:
@@ -195,6 +198,18 @@ def create_app(
     ) -> TranscribeResponse:
         cfg: ServiceConfig = request.app.state.config
         regs: Registries = request.app.state.registries
+
+        # Readiness gate. /transcribe must track /health so the surfaces stay
+        # symmetric — accepting work while warming up risks zombie jobs in a
+        # container whose warmup ultimately fails, and the caller's SQS-retry
+        # path is the right primitive for transient unavailability anyway.
+        ready_state, ready_stage, _ = request.app.state.readiness.snapshot()
+        if ready_state != "ready":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "service_not_ready", "state": ready_state, "stage": ready_stage},
+                headers={"Retry-After": "5"},
+            )
 
         # Server-side batch cap.
         if len(body.jobs) > cfg.max_batch_size:

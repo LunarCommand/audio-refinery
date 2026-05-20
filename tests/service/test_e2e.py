@@ -162,31 +162,27 @@ def test_e2e_file_uri_single_job_writes_transcript_and_summary(tmp_path: Path) -
         ],
     }
 
+    # Dynamic side_effect derives content_id from the source_dir at call time
+    # so the patch can sit in the outer `with` block. This closes the race
+    # where the worker could pull the job and call the real run_pipeline
+    # before a post-POST patch took effect.
+    def dynamic_run_pipeline(*, source_dir, **kwargs):
+        matches = list(source_dir.glob("audio_*.wav"))
+        assert len(matches) == 1, f"expected exactly one audio file, got {matches}"
+        content_id = matches[0].stem.removeprefix("audio_")
+        return _pipeline_side_effect(content_id)(source_dir=source_dir, **kwargs)
+
     with (
         client,  # context manager runs lifespan so the worker starts
+        patch("src.service.jobs.run_pipeline", new=dynamic_run_pipeline),
         patch("src.service.jobs.notify_job_failed"),
     ):
-        # Patch run_pipeline AFTER the worker thread has started (it doesn't
-        # call run_pipeline until a job lands on the queue).
-        job_id_placeholder = None
-        with patch(
-            "src.service.jobs.run_pipeline",
-            new=_pipeline_side_effect(
-                "placeholder",  # rewritten per-job inside the worker
-            ),
-        ):
-            # The side-effect closure captures content_id at construction;
-            # patch with a dynamic one after we know the actual job_id.
-            resp = client.post("/transcribe", json=body, headers=_AUTH)
-            assert resp.status_code == 202
-            payload = resp.json()
-            batch_id = payload["batch_id"]
-            job_id_placeholder = payload["job_ids"][0]
-
-        # Re-patch with the real content_id derived from the issued job_id.
-        content_id = job_id_placeholder.removeprefix("rfj_")
-        with patch("src.service.jobs.run_pipeline", new=_pipeline_side_effect(content_id)):
-            _wait_for_batch_completion(registries, batch_id, timeout=5.0)
+        resp = client.post("/transcribe", json=body, headers=_AUTH)
+        assert resp.status_code == 202
+        payload = resp.json()
+        batch_id = payload["batch_id"]
+        job_id_placeholder = payload["job_ids"][0]
+        _wait_for_batch_completion(registries, batch_id, timeout=5.0)
 
     # Transcript landed at the per-job output_uri.
     assert output_path.is_file()

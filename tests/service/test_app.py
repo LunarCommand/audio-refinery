@@ -31,6 +31,12 @@ def _config() -> ServiceConfig:
     )
 
 
+def _ready_readiness() -> ServiceReadiness:
+    r = ServiceReadiness()
+    r.mark_ready()
+    return r
+
+
 def _client(
     *,
     api_keys: set[str] | None = None,
@@ -38,10 +44,13 @@ def _client(
     registries: Registries | None = None,
     handles: PipelineHandles | None = None,
 ) -> TestClient:
+    # Default to a ready readiness object so the happy-path /transcribe and
+    # /jobs tests don't have to opt in. Tests that exercise the readiness
+    # gate explicitly pass a loading/failed readiness.
     app = create_app(
         _config(),
         registries=registries,
-        readiness=readiness,
+        readiness=readiness if readiness is not None else _ready_readiness(),
         api_keys=api_keys if api_keys is not None else {"test-key"},
         handles=handles,
         enable_lifespan_warmup=False,
@@ -213,6 +222,34 @@ def test_transcribe_batch_exceeding_max_returns_400():
 # ---------------------------------------------------------------------------
 # POST /transcribe — auth + queue capacity
 # ---------------------------------------------------------------------------
+
+
+def test_transcribe_returns_503_during_warmup():
+    """While ServiceReadiness is in the `loading` state (warmup in progress),
+    POST /transcribe must NOT accept work — same readiness contract as /health."""
+    loading = ServiceReadiness()  # default state: loading
+    client = _client(readiness=loading)
+    resp = client.post("/transcribe", json=_body(), headers=_AUTH)
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["error"] == "service_not_ready"
+    assert body["detail"]["state"] == "loading"
+    assert resp.headers.get("retry-after") == "5"
+
+
+def test_transcribe_returns_503_when_warmup_failed():
+    """When warm_up raised and ServiceReadiness is `failed`, POST /transcribe
+    returns 503. Crucially this prevents zombie jobs from queueing in a
+    container that's about to be restarted by the orchestrator."""
+    failed = ServiceReadiness()
+    failed.mark_failed("transcription", "CUDA OOM")
+    client = _client(readiness=failed)
+    resp = client.post("/transcribe", json=_body(), headers=_AUTH)
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["error"] == "service_not_ready"
+    assert body["detail"]["state"] == "failed"
+    assert body["detail"]["stage"] == "transcription"
 
 
 def test_transcribe_without_auth_returns_401():
