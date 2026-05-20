@@ -20,6 +20,7 @@ import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from src.diarizer import DiarizationError, load_pipeline
@@ -50,6 +51,16 @@ ReadyState = Literal["loading", "ready", "failed"]
 class ServiceConfig:
     """Container-startup configuration. Resolved from env vars in app.py.
 
+    Worker / queue / retention fields:
+        ``intermediate_dir`` — when set (from ``REFINERY_INTERMEDIATE_DIR``),
+            the worker copies per-stage JSONs to ``<dir>/<job_id>/`` after each
+            successful job. Debugging-only; off by default.
+        ``max_queue_size`` — JobQueue cap from ``REFINERY_MAX_QUEUE_SIZE``.
+            Default 100. Over-limit POSTs return 429.
+        ``job_retention_seconds`` — retention window for terminal jobs/batches
+            from ``REFINERY_JOB_RETENTION_SECONDS``. Default 3600 (1 hour after
+            ``completed_at`` / ``failed_at``).
+
     Thermal-guard fields:
         ``gpu_temp_limit_celsius`` — °C threshold from ``REFINERY_GPU_TEMP_LIMIT``.
             ``0`` (default) disables the guard entirely. Any positive value spawns
@@ -69,6 +80,9 @@ class ServiceConfig:
     sentiment_model: str = DEFAULT_SENTIMENT_MODEL
     sentiment_enabled: bool = False
     hf_token: str = ""
+    intermediate_dir: Path | None = None
+    max_queue_size: int = 100
+    job_retention_seconds: int = 3600
     gpu_temp_limit_celsius: int = 0
     gpu_temp_poll_seconds: float = 5.0
 

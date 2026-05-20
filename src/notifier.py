@@ -96,6 +96,18 @@ def notify_thermal_shutdown(device: str, temp: int, limit: int) -> None:
     _send(f":thermometer: *Thermal shutdown* — `{device}` at {temp}\u00b0C (limit {limit}\u00b0C). Pipeline aborted.")
 
 
+def notify_job_failed(job_id: str, stage: str, input_uri: str, error: str) -> None:
+    """Send a Slack notification when a service-mode job fails.
+
+    Service mode fires this on a per-job basis (failure-only policy).
+    Successful jobs are intentionally silent — a continuous-service workload
+    would otherwise spam the channel.
+    """
+    # Truncate the input URI so presigned query strings don't blow up the message.
+    short_uri = input_uri.split("?", 1)[0] if "?" in input_uri else input_uri
+    _send(f":x: *Job failed* — `{job_id}` at stage *{stage}*\ninput: `{short_uri}`\nerror: `{error}`")
+
+
 def notify_pipeline_parallel_complete(
     worker_statuses: list[tuple[str, str, int, int]],
     total_discovered: int,
