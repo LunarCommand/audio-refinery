@@ -82,6 +82,7 @@ class ServiceConfig:
     hf_token: str = ""
     intermediate_dir: Path | None = None
     max_queue_size: int = 100
+    max_batch_size: int = 25
     job_retention_seconds: int = 3600
     gpu_temp_limit_celsius: int = 0
     gpu_temp_poll_seconds: float = 5.0
