@@ -337,7 +337,7 @@ def run_separation_stage(
         if on_file:
             on_file(content_id, i, total)
 
-        vocals = _vocals_path(wav_path.stem, demucs_output_dir)
+        vocals = _vocals_path(wav_path.resolve().stem, demucs_output_dir)
         if resume and _file_complete(vocals):
             result.outcomes.append(FileOutcome(content_id=content_id, stage="separate", success=True, skipped=True))
             continue
@@ -421,7 +421,7 @@ def run_diarization_stage(
             result.outcomes.append(FileOutcome(content_id=content_id, stage="diarize", success=True, skipped=True))
             continue
 
-        vocals = _vocals_path(wav_path.stem, demucs_output_dir)
+        vocals = _vocals_path(wav_path.resolve().stem, demucs_output_dir)
         try:
             diar = diarize(input_file=vocals, device=device, hf_token=hf_token, _pipeline=pipeline)
             diar_path.write_text(diar.model_dump_json(indent=2))
@@ -530,7 +530,7 @@ def run_transcription_stage(
             result.outcomes.append(FileOutcome(content_id=content_id, stage="transcribe", success=True, skipped=True))
             continue
 
-        vocals = _vocals_path(wav_path.stem, demucs_output_dir)
+        vocals = _vocals_path(wav_path.resolve().stem, demucs_output_dir)
         diar_path = _diarization_path(content_id, diarization_dir)
         diar_file = diar_path if _file_complete(diar_path) else None
 
@@ -678,9 +678,9 @@ def run_pipeline(
                 FileOutcome(content_id=content_id, stage="transcribe", success=True, skipped=True)
             )
             if not keep_scratch:
-                _cleanup_stem(_vocals_path(wav_path.stem, demucs_output_dir))
+                _cleanup_stem(_vocals_path(wav_path.resolve().stem, demucs_output_dir))
                 if not enable_events:
-                    _cleanup_stem(_no_vocals_path(wav_path.stem, demucs_output_dir))
+                    _cleanup_stem(_no_vocals_path(wav_path.resolve().stem, demucs_output_dir))
         else:
             pending.append((content_id, wav_path))
 
@@ -749,8 +749,8 @@ def run_pipeline(
         # ── Pass 2: process each pending file through all active stages ────
         for content_id, wav_path in pending:
             file_idx = file_index_map[content_id]
-            vocals = _vocals_path(wav_path.stem, demucs_output_dir)
-            no_vocals = _no_vocals_path(wav_path.stem, demucs_output_dir)
+            vocals = _vocals_path(wav_path.resolve().stem, demucs_output_dir)
+            no_vocals = _no_vocals_path(wav_path.resolve().stem, demucs_output_dir)
             diar_path = _diarization_path(content_id, diarization_dir)
             tx_path = _transcription_path(content_id, transcription_dir)
 

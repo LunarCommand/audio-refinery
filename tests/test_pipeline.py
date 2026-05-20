@@ -604,6 +604,73 @@ def test_run_pipeline_no_files_found(tmp_path: Path) -> None:
     assert result.total_discovered == 0
 
 
+def test_run_pipeline_resolves_symlinks_for_demucs_output_paths(tmp_path: Path) -> None:
+    """src/separator.py:separate() resolves the input path before invoking
+    Demucs, so Demucs writes its output subdir using the resolved file's stem
+    rather than a symlink's name. The pipeline's _vocals_path prediction must
+    follow the same resolution, otherwise the diarization stage fails with
+    "vocals.wav not found" — which is exactly what bit service mode when it
+    symlinked job inputs into per-job source dirs."""
+    # Set up: real file outside source_dir, symlink inside source_dir pointing
+    # at it with a DIFFERENT stem. This mirrors what service mode does.
+    real_file = tmp_path / "real_audio.wav"
+    _make_wav(real_file)
+    source = tmp_path / "extracted"
+    source.mkdir()
+    symlink = source / "linkname.wav"
+    symlink.symlink_to(real_file)
+
+    captured: dict[str, Path] = {}
+
+    def _sep_side_effect(*, input_file, output_dir, **_kwargs):
+        captured["input_file"] = input_file
+        # Mirror Demucs's real behavior: write to <output_dir>/htdemucs/<resolved-stem>/
+        # NOT <symlink-stem>.
+        resolved_stem = Path(input_file).resolve().stem
+        stem_dir = output_dir / "htdemucs" / resolved_stem
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "vocals.wav").write_bytes(b"\x00" * 32)
+        (stem_dir / "no_vocals.wav").write_bytes(b"\x00" * 32)
+        return MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
+
+    with (
+        patch("src.pipeline.separate", side_effect=_sep_side_effect),
+        patch("src.pipeline.load_pipeline", return_value=MagicMock()),
+        patch("src.pipeline._resolve_hf_token", return_value="tok"),
+        patch(
+            "src.pipeline.diarize",
+            return_value=MagicMock(
+                processing_time_seconds=1.0,
+                model_dump_json=lambda **kw: "{}",
+                input_info=MagicMock(duration_seconds=10.0),
+                segments=[],
+            ),
+        ),
+        patch("src.pipeline._load_whisperx_model", return_value=MagicMock()),
+        patch(
+            "src.pipeline.transcribe",
+            return_value=MagicMock(
+                processing_time_seconds=1.0,
+                model_dump_json=lambda **kw: "{}",
+                input_info=MagicMock(duration_seconds=10.0),
+                segments=[],
+            ),
+        ),
+    ):
+        result = run_pipeline(
+            source_dir=source,
+            demucs_output_dir=tmp_path / "demucs",
+            diarization_dir=tmp_path / "diar",
+            transcription_dir=tmp_path / "tx",
+        )
+
+    # Diarization stage should not have failed with a missing-vocals error —
+    # because the pipeline's path prediction follows the symlink the same
+    # way separate() does.
+    assert result.diarization.n_failed == 0, [o.error for o in result.diarization.outcomes if o.error]
+    assert result.transcription.n_failed == 0
+
+
 def test_run_pipeline_models_loaded_once(source_dir: Path, tmp_path: Path) -> None:
     """Pyannote and WhisperX should each be loaded exactly once regardless of file count."""
     with (
