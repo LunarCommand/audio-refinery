@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/audio-refinery-banner.jpg" alt="Audio Refinery — whimsical audio processing for AI" width="820">
+</p>
+
 # Audio Refinery
 
 GPU-accelerated audio processing pipeline: vocal separation (Demucs), speaker diarization (Pyannote), transcription (WhisperX), and text sentiment analysis. Its primary use case is building AI-ready audio databases — transforming raw recordings into structured, speaker-attributed JSON with word-level timestamps that feed directly into RAG pipelines, vector stores, and fine-tuning datasets. The pipeline uses a Ghost Track strategy: AI models run against a clean, music-free vocal stem to maximize accuracy, then the resulting metadata is applied back to the original audio, preserving its acoustic character. Designed to run on 24 GB consumer GPUs with all models resident in VRAM simultaneously, it processes large corpora in batch with no model reload overhead between files.
@@ -109,16 +113,16 @@ selection rationale, and data model.
 
 ## Documentation
 
-| Document                               | Description                                                        |
-|----------------------------------------|--------------------------------------------------------------------|
-| [Index](docs/index.md)                 | Navigation hub for all documentation                               |
-| [CLI Reference](docs/cli.md)           | Every command, flag, and example for workstation use               |
-| [Service Guide](docs/service.md)       | HTTP API, container deployment, env vars, ops, troubleshooting     |
-| [Architecture](docs/architecture.md)   | Ghost Track pipeline design, model selection rationale, data model |
-| [Use Cases](docs/use-cases.md)         | Who uses this and for what                                         |
-| [Performance](docs/performance.md)     | Throughput benchmarks, scaling options, optimization guide         |
-| [Deployment](docs/deployment.md)       | Production patterns, async workers, Docker, monitoring             |
-| [Development](docs/development.md)      | Dev setup, testing, contributing, release process                  |
+| Document                             | Description                                                        |
+|--------------------------------------|--------------------------------------------------------------------|
+| [Index](docs/index.md)               | Navigation hub for all documentation                               |
+| [CLI Reference](docs/cli.md)         | Every command, flag, and example for workstation use               |
+| [Service Guide](docs/service.md)     | HTTP API, container deployment, env vars, ops, troubleshooting     |
+| [Architecture](docs/architecture.md) | Ghost Track pipeline design, model selection rationale, data model |
+| [Use Cases](docs/use-cases.md)       | Who uses this and for what                                         |
+| [Performance](docs/performance.md)   | Throughput benchmarks, scaling options, optimization guide         |
+| [Deployment](docs/deployment.md)     | Production patterns, async workers, Docker, monitoring             |
+| [Development](docs/development.md)   | Dev setup, testing, contributing, release process                  |
 
 ---
 
