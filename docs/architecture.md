@@ -212,6 +212,34 @@ By default, the pipeline skips any file whose output for that stage already exis
 non-empty. This makes interrupted runs safely restartable: restarting the pipeline continues
 from the first unprocessed file. `--no-resume` forces full reprocessing.
 
+## Execution Modes: CLI and Service
+
+The pipeline core (`run_pipeline()` and the stage modules) is driven by two thin
+callers that share it unchanged:
+
+```
+        CLI (audio-refinery)              Service (HTTP API)
+   one-shot / batch over a directory   async jobs, URI-in / URI-out
+                    \                        /
+                     v                      v
+            ┌───────────────────────────────────────┐
+            │   core pipeline (separate → diarize     │
+            │   → transcribe → optional sentiment)    │
+            └───────────────────────────────────────┘
+```
+
+- **CLI mode** loads models per invocation and processes a local directory. See
+  [cli.md](cli.md).
+- **Service mode** loads models once at container startup and keeps them resident
+  across HTTP jobs — the same resident-model strategy described above, amortized
+  across requests instead of across files in one batch. The service supplies the
+  pre-loaded models to `run_pipeline()` through its optional `model_handles`
+  parameter; CLI mode passes nothing and keeps the per-call load path. See
+  [service.md](service.md).
+
+Demucs always runs as a per-job subprocess in both modes, so its GPU memory is
+released cleanly between stages regardless of how the pipeline is driven.
+
 ## Storage Strategy
 
 ### RAM Disk (tmpfs)

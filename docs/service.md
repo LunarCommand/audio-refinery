@@ -337,7 +337,14 @@ output.
 ## Local development loop
 
 Use `file://` URIs with bind mounts to exercise the full service without any
-cloud setup:
+cloud setup. The quickest path is the Makefile target, which binds
+`.docker-inbox` / `.docker-outbox` / `.docker-summaries` in the repo root:
+
+```bash
+REFINERY_API_KEYS=test-key HF_TOKEN=$HF_TOKEN make run-service-local
+```
+
+Or run it explicitly with your own mount points:
 
 ```bash
 docker run --rm --gpus all -p 8000:8000 \

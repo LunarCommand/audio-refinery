@@ -68,7 +68,7 @@ of hundreds or thousands of recordings to be indexed in a single pipeline run.
 **Example workflow:**
 ```
 <archive>/
-  extracted/                 ← source WAV files (named audio_<id>.wav)
+  extracted/                 ← source WAV files (any *.wav; audio_ prefix optional)
   diarization/               ← per-episode speaker timelines
   transcription/             ← per-episode transcripts with word-level timestamps
   summary/pipeline_summary.json
