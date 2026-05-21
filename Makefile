@@ -1,4 +1,8 @@
-.PHONY: help install install-dev install-whisperx test test-verbose test-integration test-coverage lint lint-fix format format-check type-check clean pre-commit pre-commit-install all-checks ci dev-setup stats
+.PHONY: help install install-dev install-whisperx test test-verbose test-integration test-coverage lint lint-fix format format-check type-check clean pre-commit pre-commit-install all-checks ci dev-setup stats build-image run-service-local
+
+# Read the version from pyproject.toml so build-image stays in sync with releases.
+VERSION := $(shell awk -F'"' '/^version = /{print $$2; exit}' pyproject.toml)
+IMAGE_NAME := lunarcommand/audio-refinery
 
 # Default target
 .DEFAULT_GOAL := help
@@ -25,7 +29,9 @@ test: ## Run unit tests (no GPU required)
 test-verbose: ## Run unit tests with verbose output
 	uv run python -m pytest tests/ -m "not integration" -vv
 
-test-integration: ## Run integration tests (requires GPU + models)
+test-integration: ## Run integration tests (GPU + REFINERY_TEST_AUDIO_DIR + HF_TOKEN required)
+	@echo "Integration tests use WAV files from REFINERY_TEST_AUDIO_DIR (or tests/_audio_fixtures/)."
+	@echo "Set HF_TOKEN for pyannote model download. Tests skip cleanly when fixtures are missing."
 	uv run python -m pytest tests/ -m "integration" -v
 
 test-coverage: ## Run unit tests with coverage report (fails under 75%)
@@ -89,6 +95,24 @@ data = json.dumps({'text': ':white_check_mark: *Test notification* from \`audio-
 req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'}); \
 urllib.request.urlopen(req, timeout=5); \
 print('Test notification sent — check your Slack channel')"
+
+build-image: ## Build the Docker image, tagged with the pyproject.toml version + :latest
+	docker build -t $(IMAGE_NAME):$(VERSION) -t $(IMAGE_NAME):latest .
+	@echo ""
+	@echo "Built $(IMAGE_NAME):$(VERSION) and $(IMAGE_NAME):latest"
+
+run-service-local: ## Run the service container against bind-mounted /inbox + /outbox + /summaries
+	@if [ -z "$(REFINERY_API_KEYS)" ]; then echo "REFINERY_API_KEYS must be set in your environment"; exit 1; fi
+	@if [ -z "$(HF_TOKEN)" ]; then echo "HF_TOKEN must be set in your environment"; exit 1; fi
+	docker run --rm --gpus all \
+		-p 8000:8000 \
+		-e REFINERY_API_KEYS \
+		-e HF_TOKEN \
+		-e REFINERY_LOG_FORMAT=console \
+		-v $(PWD)/.docker-inbox:/inbox \
+		-v $(PWD)/.docker-outbox:/outbox \
+		-v $(PWD)/.docker-summaries:/summaries \
+		$(IMAGE_NAME):latest
 
 stats: ## Show project statistics
 	@echo "Project Statistics:"

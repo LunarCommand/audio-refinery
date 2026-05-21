@@ -5,7 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-05-20
+
+### Added
+
+- HTTP service mode: a long-lived FastAPI service (`audio-refinery-service` entry point) exposing `POST /transcribe`, `GET /jobs/{id}`, and `GET /health`. Accepts multi-job batches, processes them serially on a background worker, and writes one combined transcript per job plus one summary per batch. Models load once at container startup and stay resident across jobs.
+- Combined transcript schema (v1.0.0) and per-batch summary schema (v1.0.0) — service-mode output documents that envelope the existing per-stage results so consumers read a single document per job/batch.
+- Bearer-token authentication via the `REFINERY_API_KEYS` allowlist; request and job-lifecycle logs carry a non-reversible caller fingerprint.
+- URI-driven I/O for the service: `https://` (presigned GET for input, presigned PUT for output/summary) and `file://` for local-dev and shared-volume deployments.
+- Multi-stage Dockerfile (CUDA 12.1 runtime base, non-root `refinery` user) published as `lunarcommand/audio-refinery` on Docker Hub.
+- `audio-refinery serve` CLI subcommand — a convenience wrapper around the service entry point.
+- Optional GPU thermal guard in service mode via `REFINERY_GPU_TEMP_LIMIT` / `REFINERY_GPU_TEMP_POLL_SECONDS`, reusing the CLI's monitor.
+- Service configuration via environment variables: `REFINERY_API_KEYS`, `REFINERY_DEVICE`, `REFINERY_WHISPER_MODEL`, `REFINERY_COMPUTE_TYPE`, `REFINERY_DEFAULT_LANGUAGE`, `REFINERY_SENTIMENT_ENABLED`, `REFINERY_SCRATCH_DIR`, `REFINERY_INTERMEDIATE_DIR`, `REFINERY_MAX_BATCH_SIZE`, `REFINERY_MAX_QUEUE_SIZE`, `REFINERY_JOB_RETENTION_SECONDS`, `REFINERY_PORT`, and `REFINERY_LOG_FORMAT`.
+
+### Changed
+
+- Demucs scratch directory is now host-agnostic: it defaults to `tempfile.gettempdir()/audio-refinery-demucs` and honors `REFINERY_SCRATCH_DIR` in both CLI and service mode, replacing the hard-coded `/mnt/fast_scratch` path.
+- CLI batch input now accepts any `*.wav` file; the `audio_` filename prefix is optional and stripped from the derived content ID, replacing the previous required `audio_<id>.wav` pattern.
+- Sentiment analysis treats segments with no transcribed speech (e.g. silent audio) as no-ops rather than failures.
+- Added `fastapi`, `uvicorn[standard]`, and `httpx` as main dependencies for service mode.
+- Documentation restructured into a two-path (CLI + service) layout: lowercase `docs/` filenames, a slimmed README with a "choose your path" landing, and new `docs/cli.md`, `docs/service.md`, and `docs/index.md`.
+
+### Security
+
+- Scoped both GitHub Actions workflows (`ci.yml`, `release.yml`) to least-privilege permissions. Workflow default is now `contents: read`; the `github-release` job retains an explicit `contents: write` override. Closes CodeQL workflow-permission alerts.
+- Upgraded vulnerable transitive dependencies: `idna` 3.11 → 3.15, `Mako` 1.3.10 → 1.3.12, `Pillow` 12.1.1 → 12.2.0, `urllib3` 2.6.3 → 2.7.0. Closes nine Dependabot alerts covering path-traversal, redirect-header forwarding, decompression-bomb, OOB-write, and integer-overflow CVEs.
+
+### Known security debt
+
+- 18 Dependabot alerts remain open against `torch` and `transformers` (including one critical and several high severity). Both packages are pinned to WhisperX-compatible versions (`torch==2.1.2`, `transformers>=4.30,<4.40`) and cannot be upgraded without breaking the current ASR pipeline. These alerts close together when v0.3.0 lands and removes WhisperX from the critical path; see the universal alignment plan for the migration path.
+
+### Tests
+
+- Suppressed live Slack webhook calls during the test run via an autouse `_no_slack` fixture in `tests/conftest.py`. Previously, `notifier._send()` loaded the developer's `.env` on every invocation and POSTed real messages whenever pipeline tests triggered end-of-batch notifications.
 
 ## [0.1.1] - 2026-03-06
 

@@ -29,6 +29,7 @@ from src.diarizer import (
     DiarizationError,
     diarize,
 )
+from src.fs_utils import detect_fstype
 from src.gpu_utils import (
     detect_gpu_order,
     load_tflops_table,
@@ -147,58 +148,34 @@ def _fmt_time(seconds: float) -> str:
     return f"{mins}m {secs}s"
 
 
-def _mkdir_demucs(demucs_path: Path, base_path: Path, demucs_on_ramdisk: bool) -> tuple[Path, bool]:
-    """Create demucs_path, prompting for local fallback on PermissionError.
-
-    Returns (final_demucs_path, final_demucs_on_ramdisk).
-    """
-    try:
-        demucs_path.mkdir(parents=True, exist_ok=True)
-        return demucs_path, demucs_on_ramdisk
-    except PermissionError:
-        console.print(
-            Panel(
-                "[bold yellow]/mnt/fast_scratch is not writable.[/bold yellow]\n\n"
-                "The RAM disk is mounted but the current user cannot write to it.\n"
-                "Remount with open permissions:\n\n"
-                "  [dim]sudo mount -o remount,mode=1777 /mnt/fast_scratch[/dim]\n\n"
-                f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]",
-                title="[yellow bold]RAM Disk Not Writable[/yellow bold]",
-                border_style="yellow",
-            )
-        )
-        if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
-            console.print("[dim]Aborted.[/dim]")
-            sys.exit(0)
-        demucs_path = base_path / "demucs"
-        demucs_path.mkdir(parents=True, exist_ok=True)
-        return demucs_path, False
-
-
 def _resolve_demucs_scratch(base_path: Path) -> tuple[Path, bool]:
-    """Resolve the Demucs scratch directory, prompting if /mnt/fast_scratch is unavailable.
+    """Resolve the Demucs scratch directory and detect whether it's RAM-backed.
 
-    Returns (demucs_path, demucs_on_ramdisk). Exits if the user declines local fallback.
+    Resolution:
+      1. ``REFINERY_SCRATCH_DIR`` env var (shared with service mode).
+      2. ``DEFAULT_OUTPUT_DIR`` from :mod:`src.separator` (host-agnostic
+         tempfile location).
+
+    Returns ``(demucs_path, demucs_on_ramdisk)`` where ``demucs_on_ramdisk`` is
+    True when the resolved path lives on tmpfs (detected via /proc/mounts).
     """
-    fast_scratch = Path("/mnt/fast_scratch")
-    if fast_scratch.is_mount():
-        return fast_scratch / "demucs", True
-    console.print(
-        Panel(
-            "[bold yellow]/mnt/fast_scratch is not mounted.[/bold yellow]\n\n"
-            "The RAM disk is not available. Without it, Demucs scratch files will be\n"
-            "written to local storage, which is slower and increases SSD wear.\n\n"
-            f"  Fallback path: [bold]{base_path / 'demucs'}[/bold]\n\n"
-            "To mount the RAM disk before running:\n"
-            "  [dim]sudo mount -t tmpfs -o size=32G,mode=1777 tmpfs /mnt/fast_scratch[/dim]",
-            title="[yellow bold]RAM Disk Not Available[/yellow bold]",
-            border_style="yellow",
-        )
-    )
-    if not click.confirm("Continue using local storage for Demucs scratch?", default=False):
-        console.print("[dim]Aborted.[/dim]")
-        sys.exit(0)
-    return base_path / "demucs", False
+    env = os.getenv("REFINERY_SCRATCH_DIR")
+    path = Path(env) / "demucs" if env else DEFAULT_OUTPUT_DIR
+    is_ramdisk = detect_fstype(path) == "tmpfs"
+    return path, is_ramdisk
+
+
+def _mkdir_demucs(demucs_path: Path, base_path: Path, demucs_on_ramdisk: bool) -> tuple[Path, bool]:
+    """Create ``demucs_path``. Fails with a clear error if the path isn't writable.
+
+    Kept as a thin wrapper so the call sites stay symmetric with the previous
+    interactive-fallback version. With the workstation-specific
+    ``/mnt/fast_scratch`` default gone, the failure case is now a real
+    misconfiguration (operator pointed REFINERY_SCRATCH_DIR at an unwritable
+    path) rather than a missing RAM disk to prompt about.
+    """
+    demucs_path.mkdir(parents=True, exist_ok=True)
+    return demucs_path, demucs_on_ramdisk
 
 
 @click.group()
@@ -775,8 +752,8 @@ def sentiment_cmd(transcription_file: str, model: str, device: str, output_file:
     default=None,
     hidden=True,
     help=(
-        "Override the Demucs scratch directory. When set, the RAM disk check and "
-        "interactive prompt are skipped entirely. Used internally by pipeline-parallel."
+        "Override the Demucs scratch directory. Used internally by pipeline-parallel; "
+        "operators normally set REFINERY_SCRATCH_DIR instead."
     ),
 )
 @click.option(
@@ -854,9 +831,9 @@ def pipeline(
 
     Each file is carried through all active stages (separation → diarization →
     transcription) before moving to the next file. All models are loaded once at
-    startup. Ghost-track stems are cleaned up from the RAM disk as soon as they
-    are no longer needed, keeping scratch-disk usage bounded to roughly one file
-    at a time regardless of how many files are in the run.
+    startup. Ghost-track stems are cleaned up from the scratch directory as soon
+    as they are no longer needed, keeping disk usage bounded to roughly one
+    file at a time regardless of how many files are in the run.
 
     Steps 5 (--emotion, Speech Emotion Recognition) and 6 (--events, Audio Event
     Detection via CLAP) are scaffolded but not yet implemented.
@@ -868,9 +845,10 @@ def pipeline(
       <base>/sentiment/     — sentiment JSON files (created if --sentiment is set)
       <base>/summary/       — pipeline run summary (created if absent)
 
-    Demucs scratch (priority order):
-      /mnt/fast_scratch/demucs  — RAM disk (used automatically if mounted)
-      <base>/demucs             — disk fallback (requires confirmation)
+    Demucs scratch resolves to $REFINERY_SCRATCH_DIR/demucs when set, or
+    tempfile.gettempdir()/audio-refinery-demucs otherwise. Point the env var
+    at a tmpfs mount for the RAM-backed throughput benefit, or override
+    per-invocation with --demucs-output-dir.
     """
     from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
@@ -888,7 +866,7 @@ def pipeline(
         console.print(
             Panel(
                 f"[bold]Source directory not found:[/bold] {source_path}\n"
-                "Create the directory and place audio_<content_id>.wav files inside it.",
+                "Create the directory and place .wav files inside it.",
                 title="[red bold]Error[/red bold]",
                 border_style="red",
             )
@@ -901,10 +879,11 @@ def pipeline(
         _warn_if_gpu_busy([device])
 
     # Resolve Demucs scratch location.
-    # --demucs-dir (set by pipeline-parallel) bypasses the interactive check entirely.
+    # --demucs-dir (set by pipeline-parallel) overrides everything; otherwise the
+    # helper picks up REFINERY_SCRATCH_DIR or falls back to the tempfile default.
     if demucs_dir is not None:
         demucs_path = Path(demucs_dir)
-        demucs_on_ramdisk = demucs_path.is_mount()
+        demucs_on_ramdisk = detect_fstype(demucs_path) == "tmpfs"
     else:
         demucs_path, demucs_on_ramdisk = _resolve_demucs_scratch(base_path)
 
@@ -935,7 +914,11 @@ def pipeline(
             )
         )
 
-    scratch_suffix = "[dim](RAM disk)[/dim]" if demucs_on_ramdisk else "[yellow](disk — RAM disk not mounted)[/yellow]"
+    scratch_suffix = (
+        "[dim](RAM-backed)[/dim]"
+        if demucs_on_ramdisk
+        else "[yellow](disk-backed — set REFINERY_SCRATCH_DIR to a tmpfs mount for faster batches)[/yellow]"
+    )
     scratch_label = f"{demucs_path} {scratch_suffix}"
 
     steps_active = "1 · Separate  2 · Diarize  3 · Transcribe"
@@ -975,7 +958,7 @@ def pipeline(
         files = [(cid, p) for cid, p in files if cid in manifest_set]
 
     if not files:
-        console.print("[yellow]No audio_*.wav files found in source directory.[/yellow]")
+        console.print("[yellow]No .wav files found in source directory.[/yellow]")
         return
 
     total = len(files)
@@ -1449,7 +1432,7 @@ def pipeline_parallel(
         console.print(
             Panel(
                 f"[bold]Source directory not found:[/bold] {source_path}\n"
-                "Create the directory and place audio_<content_id>.wav files inside it.",
+                "Create the directory and place .wav files inside it.",
                 title="[red bold]Error[/red bold]",
                 border_style="red",
             )
@@ -1474,7 +1457,7 @@ def pipeline_parallel(
         all_files = discover_files(source_path)
 
     if not all_files:
-        console.print("[yellow]No audio_*.wav files found in source directory.[/yellow]")
+        console.print("[yellow]No .wav files found in source directory.[/yellow]")
         return
 
     # Sort largest-first (LPT heuristic) before interleaving so that the
@@ -1574,7 +1557,7 @@ def pipeline_parallel(
         return cmd
 
     # ── Print launch summary ────────────────────────────────────────────────
-    scratch_suffix = "(RAM disk)" if demucs_on_ramdisk else "(disk)"
+    scratch_suffix = "(RAM-backed)" if demucs_on_ramdisk else "(disk-backed)"
     tflops_table = load_tflops_table()
 
     def _gpu_stat_line(gpu_device: str) -> str:
@@ -1872,3 +1855,19 @@ def pipeline_parallel(
         failed_logs = "\n".join(f"  {w['log']}" for w in workers)
         console.print(f"[dim]Worker logs retained for inspection:[/dim]\n{failed_logs}")
         sys.exit(1)
+
+
+@cli.command("serve")
+def serve():
+    """Run the HTTP service (equivalent to `audio-refinery-service`).
+
+    Configuration is read entirely from environment variables — see
+    docs/service.md for the full reference. This subcommand is a convenience
+    wrapper so local-dev users can stay on a single binary name. The
+    production container CMD still invokes `audio-refinery-service` directly.
+    """
+    # Lazy import so the rest of the CLI doesn't pay the FastAPI/uvicorn
+    # import cost on every `audio-refinery --help` or pipeline invocation.
+    from src.service.app import run
+
+    run()

@@ -50,7 +50,7 @@ def source_dir(tmp_path: Path) -> Path:
     d = tmp_path / "extracted"
     d.mkdir()
     for cid in ["abc123", "def456", "ghi789"]:
-        _make_wav(d / f"audio_{cid}.wav")
+        _make_wav(d / f"{cid}.wav")
     return d
 
 
@@ -98,11 +98,37 @@ def test_discover_files_empty_dir(tmp_path: Path) -> None:
     assert discover_files(tmp_path) == []
 
 
-def test_discover_files_ignores_non_matching(source_dir: Path) -> None:
-    _make_wav(source_dir / "other.wav")
+def test_discover_files_ignores_non_wav_extensions(source_dir: Path) -> None:
+    """Non-.wav files (e.g. mp3) are ignored; any .wav stem is accepted."""
     (source_dir / "audio_something.mp3").write_bytes(b"x")
     files = discover_files(source_dir)
-    assert len(files) == 3  # only the original three
+    # Source dir already has the 3 fixture WAVs; the mp3 isn't picked up.
+    assert len(files) == 3
+
+
+def test_discover_files_accepts_arbitrary_stem(source_dir: Path) -> None:
+    """Any .wav file is discovered. Content_id is the filename stem."""
+    _make_wav(source_dir / "other.wav")
+    _make_wav(source_dir / "1C92S21It9-gFDeHOJg5c.wav")
+    files = discover_files(source_dir)
+    ids = {cid for cid, _ in files}
+    # 3 fixture cids + 2 added.
+    assert "other" in ids
+    assert "1C92S21It9-gFDeHOJg5c" in ids
+    assert len(files) == 5
+
+
+def test_discover_files_strips_audio_prefix_for_backward_compat(tmp_path: Path) -> None:
+    """Files named ``audio_<id>.wav`` (the upstream audio-extractor convention)
+    still produce ``content_id = <id>`` — same as the old behavior, so runs that
+    used to land in diarization_<id>.json still go to the same place."""
+    d = tmp_path / "extracted"
+    d.mkdir()
+    _make_wav(d / "audio_legacy123.wav")
+    _make_wav(d / "newstyle.wav")
+    files = discover_files(d)
+    ids = {cid for cid, _ in files}
+    assert ids == {"legacy123", "newstyle"}
 
 
 def test_discover_files_sorted(source_dir: Path) -> None:
@@ -578,6 +604,73 @@ def test_run_pipeline_no_files_found(tmp_path: Path) -> None:
     assert result.total_discovered == 0
 
 
+def test_run_pipeline_resolves_symlinks_for_demucs_output_paths(tmp_path: Path) -> None:
+    """src/separator.py:separate() resolves the input path before invoking
+    Demucs, so Demucs writes its output subdir using the resolved file's stem
+    rather than a symlink's name. The pipeline's _vocals_path prediction must
+    follow the same resolution, otherwise the diarization stage fails with
+    "vocals.wav not found" — which is exactly what bit service mode when it
+    symlinked job inputs into per-job source dirs."""
+    # Set up: real file outside source_dir, symlink inside source_dir pointing
+    # at it with a DIFFERENT stem. This mirrors what service mode does.
+    real_file = tmp_path / "real_audio.wav"
+    _make_wav(real_file)
+    source = tmp_path / "extracted"
+    source.mkdir()
+    symlink = source / "linkname.wav"
+    symlink.symlink_to(real_file)
+
+    captured: dict[str, Path] = {}
+
+    def _sep_side_effect(*, input_file, output_dir, **_kwargs):
+        captured["input_file"] = input_file
+        # Mirror Demucs's real behavior: write to <output_dir>/htdemucs/<resolved-stem>/
+        # NOT <symlink-stem>.
+        resolved_stem = Path(input_file).resolve().stem
+        stem_dir = output_dir / "htdemucs" / resolved_stem
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "vocals.wav").write_bytes(b"\x00" * 32)
+        (stem_dir / "no_vocals.wav").write_bytes(b"\x00" * 32)
+        return MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
+
+    with (
+        patch("src.pipeline.separate", side_effect=_sep_side_effect),
+        patch("src.pipeline.load_pipeline", return_value=MagicMock()),
+        patch("src.pipeline._resolve_hf_token", return_value="tok"),
+        patch(
+            "src.pipeline.diarize",
+            return_value=MagicMock(
+                processing_time_seconds=1.0,
+                model_dump_json=lambda **kw: "{}",
+                input_info=MagicMock(duration_seconds=10.0),
+                segments=[],
+            ),
+        ),
+        patch("src.pipeline._load_whisperx_model", return_value=MagicMock()),
+        patch(
+            "src.pipeline.transcribe",
+            return_value=MagicMock(
+                processing_time_seconds=1.0,
+                model_dump_json=lambda **kw: "{}",
+                input_info=MagicMock(duration_seconds=10.0),
+                segments=[],
+            ),
+        ),
+    ):
+        result = run_pipeline(
+            source_dir=source,
+            demucs_output_dir=tmp_path / "demucs",
+            diarization_dir=tmp_path / "diar",
+            transcription_dir=tmp_path / "tx",
+        )
+
+    # Diarization stage should not have failed with a missing-vocals error —
+    # because the pipeline's path prediction follows the symlink the same
+    # way separate() does.
+    assert result.diarization.n_failed == 0, [o.error for o in result.diarization.outcomes if o.error]
+    assert result.transcription.n_failed == 0
+
+
 def test_run_pipeline_models_loaded_once(source_dir: Path, tmp_path: Path) -> None:
     """Pyannote and WhisperX should each be loaded exactly once regardless of file count."""
     with (
@@ -869,7 +962,7 @@ def test_run_pipeline_no_vocals_deleted_when_events_disabled(source_dir: Path, t
     def _sep_side_effect(**kwargs):
         # Derive the content_id from the actual input file so each call creates
         # stems for the correct file, not always for the first cid.
-        current_cid = kwargs["input_file"].stem[len("audio_") :]
+        current_cid = kwargs["input_file"].stem
         _make_wav(_vocals_path(current_cid, demucs_dir))
         _make_wav(_no_vocals_path(current_cid, demucs_dir))
         return MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
@@ -917,7 +1010,7 @@ def test_run_pipeline_no_vocals_kept_when_events_enabled(source_dir: Path, tmp_p
     no_vocals = _no_vocals_path(cid, demucs_dir)
 
     def _sep_side_effect(**kwargs):
-        current_cid = kwargs["input_file"].stem[len("audio_") :]
+        current_cid = kwargs["input_file"].stem
         _make_wav(_vocals_path(current_cid, demucs_dir))
         _make_wav(_no_vocals_path(current_cid, demucs_dir))
         return MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
@@ -965,7 +1058,7 @@ def test_run_pipeline_vocals_deleted_after_transcription(source_dir: Path, tmp_p
     vocals = _vocals_path(cid, demucs_dir)
 
     def _sep_side_effect(**kwargs):
-        current_cid = kwargs["input_file"].stem[len("audio_") :]
+        current_cid = kwargs["input_file"].stem
         _make_wav(_vocals_path(current_cid, demucs_dir))
         return MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
 
@@ -1002,3 +1095,140 @@ def test_run_pipeline_vocals_deleted_after_transcription(source_dir: Path, tmp_p
         )
 
     assert not vocals.exists()
+
+
+# ---------------------------------------------------------------------------
+# Service-mode handle injection (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_run_pipeline_uses_supplied_model_handles_and_skips_internal_load(source_dir: Path, tmp_path: Path) -> None:
+    """When the service supplies PipelineHandles, run_pipeline must reuse them
+    and skip the internal pyannote / WhisperX load calls entirely. The CLI's
+    self-managed load path is preserved by the same code, exercised by the
+    rest of the suite — this test isolates the new injection branch."""
+    from src.service.config import PipelineHandles
+
+    diar_handle = MagicMock(name="pre-loaded-pyannote")
+    wx_handle = MagicMock(name="pre-loaded-whisperx")
+    handles = PipelineHandles(diarization=diar_handle, whisperx=wx_handle, sentiment=None)
+
+    diarize_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=2.0,
+            model_dump_json=lambda **kw: "{}",
+            input_info=MagicMock(duration_seconds=10.0),
+            segments=[],
+        )
+    )
+    transcribe_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=5.0,
+            model_dump_json=lambda **kw: "{}",
+            input_info=MagicMock(duration_seconds=10.0),
+            segments=[],
+        )
+    )
+
+    with (
+        patch(
+            "src.pipeline.separate",
+            return_value=MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0)),
+        ),
+        patch("src.pipeline.load_pipeline") as load_diar,
+        patch("src.pipeline._load_whisperx_model") as load_wx,
+        patch("src.pipeline._resolve_hf_token") as resolve_token,
+        patch("src.pipeline.diarize", new=diarize_mock),
+        patch("src.pipeline.transcribe", new=transcribe_mock),
+    ):
+        result = run_pipeline(
+            source_dir=source_dir,
+            demucs_output_dir=tmp_path / "stems",
+            diarization_dir=tmp_path / "diar",
+            transcription_dir=tmp_path / "tx",
+            model_handles=handles,
+        )
+
+    # Internal loaders must NOT be called when handles are supplied.
+    load_diar.assert_not_called()
+    load_wx.assert_not_called()
+    resolve_token.assert_not_called()
+
+    # The supplied handles must be the ones forwarded into the stage calls.
+    diarize_call_kwargs = diarize_mock.call_args.kwargs
+    assert diarize_call_kwargs.get("_pipeline") is diar_handle
+    transcribe_call_kwargs = transcribe_mock.call_args.kwargs
+    assert transcribe_call_kwargs.get("_whisperx_model") is wx_handle
+
+    # Pipeline still produces outcomes for every file.
+    assert result.total_discovered == 3
+
+
+def test_run_pipeline_uses_supplied_sentiment_handle_when_sentiment_enabled(source_dir: Path, tmp_path: Path) -> None:
+    """The sentiment handle on PipelineHandles is forwarded to analyze_sentiment;
+    load_sentiment_pipeline must not be called."""
+    from src.service.config import PipelineHandles
+
+    sentiment_handle = MagicMock(name="pre-loaded-sentiment")
+    handles = PipelineHandles(
+        diarization=MagicMock(),
+        whisperx=MagicMock(),
+        sentiment=sentiment_handle,
+    )
+
+    # Mock the per-file pipeline stages so the run completes.
+    sep_mock = MagicMock(
+        return_value=MagicMock(processing_time_seconds=1.0, input_info=MagicMock(duration_seconds=10.0))
+    )
+    diar_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=2.0,
+            model_dump_json=lambda **kw: "{}",
+            input_info=MagicMock(duration_seconds=10.0),
+            segments=[],
+        )
+    )
+    tx_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=5.0,
+            model_dump_json=lambda **kw: "{}",
+            input_info=MagicMock(duration_seconds=10.0),
+            segments=[],
+        )
+    )
+    sent_mock = MagicMock(
+        return_value=MagicMock(
+            processing_time_seconds=0.5,
+            model_dump_json=lambda **kw: "{}",
+            segments=[],
+        )
+    )
+
+    with (
+        patch("src.pipeline.separate", new=sep_mock),
+        patch("src.pipeline.load_pipeline") as load_diar,
+        patch("src.pipeline._load_whisperx_model") as load_wx,
+        patch("src.pipeline.load_sentiment_pipeline") as load_sentiment,
+        patch("src.pipeline.diarize", new=diar_mock),
+        patch("src.pipeline.transcribe", new=tx_mock),
+        patch("src.pipeline.analyze_sentiment", new=sent_mock),
+    ):
+        run_pipeline(
+            source_dir=source_dir,
+            demucs_output_dir=tmp_path / "stems",
+            diarization_dir=tmp_path / "diar",
+            transcription_dir=tmp_path / "tx",
+            sentiment_dir=tmp_path / "sent",
+            enable_sentiment=True,
+            model_handles=handles,
+        )
+
+    # None of the loaders should have run.
+    load_diar.assert_not_called()
+    load_wx.assert_not_called()
+    load_sentiment.assert_not_called()
+
+    # The supplied sentiment handle must be the one forwarded.
+    assert sent_mock.call_count > 0
+    sent_call_kwargs = sent_mock.call_args.kwargs
+    assert sent_call_kwargs.get("_sentiment_pipeline") is sentiment_handle

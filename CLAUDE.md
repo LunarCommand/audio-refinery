@@ -31,12 +31,22 @@ audio-refinery/
 │   ├── gpu_utils.py           # GPU queries via nvidia-smi
 │   ├── notifier.py            # Slack webhook notifications
 │   ├── gpu_tflops.toml        # GPU performance lookup table
-│   └── models/                # Pydantic output models
+│   ├── models/                # Pydantic output models
+│   │   ├── __init__.py
+│   │   ├── audio.py           # AudioFileInfo, SeparationResult
+│   │   ├── diarization.py     # DiarizationResult, SpeakerSegment
+│   │   ├── transcription.py   # TranscriptionResult, TranscriptSegment, WordSegment
+│   │   └── sentiment.py       # SentimentResult, SegmentSentiment, SentimentScore
+│   └── service/               # HTTP service mode (parallel to CLI; same core pipeline)
 │       ├── __init__.py
-│       ├── audio.py           # AudioFileInfo, SeparationResult
-│       ├── diarization.py     # DiarizationResult, SpeakerSegment
-│       ├── transcription.py   # TranscriptionResult, TranscriptSegment, WordSegment
-│       └── sentiment.py       # SentimentResult, SegmentSentiment, SentimentScore
+│       ├── app.py             # FastAPI app, endpoints, lifespan, `audio-refinery-service` entry
+│       ├── auth.py            # Bearer-token middleware + allowlist
+│       ├── jobs.py            # Job registry, FIFO queue, background-thread worker
+│       ├── lifecycle.py       # Model warmup, readiness state, pre-loaded handles
+│       ├── api_schemas.py     # HTTP transport schemas (request/response Pydantic models)
+│       ├── config.py          # ServiceConfig + PipelineHandles (pure data)
+│       ├── schemas.py         # Combined transcript + batch summary Pydantic schemas (v1.0.0)
+│       └── uri_io.py          # URI fetch/upload (https://, file://)
 ├── tests/                      # Test suite
 │   ├── conftest.py            # Shared fixtures (GPU mock, tmp dirs, synthetic audio)
 │   ├── test_cli.py
@@ -48,9 +58,10 @@ audio-refinery/
 │   ├── test_pipeline_parallel.py
 │   ├── test_gpu_utils.py
 │   ├── test_integration.py    # GPU-required tests (mark: integration)
-│   └── models/                # Pydantic model validation tests
+│   ├── models/                # Pydantic model validation tests
+│   └── service/               # Service-mode unit/integration tests
 ├── docs/
-│   └── DEVELOPMENT.md         # Developer guide
+│   └── development.md         # Developer guide
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml             # CI: unit tests + lint + type check
@@ -78,10 +89,20 @@ sentiment_analyzer.py → analyze_sentiment(transcription_file, ...) → Sentime
 
 `pipeline.py` orchestrates these in sequence for batch processing.
 
+### Service Mode (src/service/)
+
+A long-lived HTTP service that wraps the same `run_pipeline()` core as the CLI.
+Adds: bearer-auth HTTP API (`POST /transcribe`, `GET /jobs/{id}`, `GET /health`),
+URI fetch/upload (`https://` presigned + `file://`), background-thread worker
+processing jobs serially, single combined transcript JSON output, and
+`.error.json` sidecars for failures. Models load once at container startup
+and stay resident. See `_reqs/service-mode.md` and `_plans/service-mode-plan.md`.
+
 ### CLI (cli.py)
 
 - Click command group: `audio-refinery`
-- Commands: `separate`, `diarize`, `transcribe`, `sentiment`, `pipeline`, `pipeline-parallel`
+- Commands: `separate`, `diarize`, `transcribe`, `sentiment`, `pipeline`, `pipeline-parallel`, `serve`
+- `serve` lazy-imports and runs the FastAPI service — equivalent to the `audio-refinery-service` entry point (`src.service.app:run`). It's a convenience wrapper; the container CMD uses the direct entry point.
 - All commands use Rich panels/tables for output
 - GPU pre-flight check runs before any GPU operation (via `query_compute_processes()`)
 - Device strings follow PyTorch convention: `cuda`, `cuda:0`, `cuda:1`, `cpu`
@@ -111,6 +132,7 @@ All pipeline outputs are Pydantic models with full provenance:
 - **NumPy**: must stay `<2.0.0` (WhisperX ctranslate2 backend)
 - **WhisperX**: in `[project.optional-dependencies] conflicting` — install separately AFTER main deps due to PyTorch version conflict
 - **Python**: strictly 3.11.x — pyannote.audio and WhisperX don't support 3.12+
+- **FastAPI / uvicorn / httpx**: main deps for service mode — FastAPI + uvicorn serve the HTTP API; httpx fetches/uploads `https://` URIs in `src/service/uri_io.py`
 
 ## Development Commands
 

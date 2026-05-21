@@ -5,8 +5,10 @@ between pipeline stages. All functions are pure/deterministic except
 separate() which shells out to Demucs.
 """
 
+import os
 import shutil
 import subprocess
+import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,7 +17,25 @@ import soundfile as sf
 
 from src.models.audio import AudioFileInfo, SeparationResult
 
-DEFAULT_OUTPUT_DIR = Path("/mnt/fast_scratch/demucs_output")
+
+def _default_output_dir() -> Path:
+    """Resolve the default Demucs scratch directory.
+
+    Honors ``REFINERY_SCRATCH_DIR`` (shared with service mode) when set, so
+    operators on a host with a tmpfs mount can point both modes at the same
+    RAM-backed location. Otherwise falls back to the system tempfile location
+    (``TMPDIR`` env or ``/tmp``), which is host-agnostic and works in
+    containers, on laptops, and on shared hosts without setup. Operators
+    who specifically want a RAM-disk mount can either set the env var or
+    pass ``--demucs-output-dir`` on the CLI.
+    """
+    env = os.getenv("REFINERY_SCRATCH_DIR")
+    if env:
+        return Path(env) / "demucs"
+    return Path(tempfile.gettempdir()) / "audio-refinery-demucs"
+
+
+DEFAULT_OUTPUT_DIR = _default_output_dir()
 DEFAULT_MODEL = "htdemucs"
 DEFAULT_DEVICE = "cuda"
 
@@ -121,7 +141,12 @@ def separate(
     started_at = datetime.now(UTC)
     t0 = time.monotonic()
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # Force UTF-8 decoding with `errors="replace"` so Demucs's tqdm progress
+    # bars (and any other Unicode in its stderr) don't crash subprocess.run on
+    # hosts whose locale resolves to ASCII. The actual separation work has
+    # already completed by the time we read stdout/stderr — losing a few
+    # progress-bar characters to U+FFFD is harmless.
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     processing_time = time.monotonic() - t0
     completed_at = datetime.now(UTC)

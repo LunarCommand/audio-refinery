@@ -117,6 +117,7 @@ Key design decisions:
 - `cli.py` and `pipeline.py` are the only orchestrators; stage modules have no CLI coupling
 - GPU pre-flight checks (via `query_compute_processes()`) run before any GPU operation
 - Test mocking: the `_gpu_free` autouse fixture in `conftest.py` patches nvidia-smi
+- `run_pipeline()` takes an optional `model_handles` parameter — service mode passes pre-loaded models through it so they load once at container startup instead of per call. Keep this parameter intact (and optional) when changing the pipeline signature; both CLI mode (no handles) and service mode depend on it.
 
 ## License
 

@@ -64,3 +64,23 @@ class TestSeparateCommand:
 
         assert result.exit_code == 0
         assert "OUTPUT" in result.output or "output" in result.output.lower()
+
+
+class TestServeCommand:
+    def test_help(self):
+        """`audio-refinery serve --help` lists the subcommand."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["serve", "--help"])
+
+        assert result.exit_code == 0
+        assert "HTTP service" in result.output
+
+    def test_dispatches_to_service_run(self, mocker):
+        """Invoking `serve` calls `src.service.app.run` once."""
+        mock_run = mocker.patch("src.service.app.run")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["serve"])
+
+        assert result.exit_code == 0
+        mock_run.assert_called_once_with()

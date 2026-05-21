@@ -173,12 +173,18 @@ class TestAnalyzeSentiment:
         with pytest.raises(SentimentError, match="Failed to parse"):
             analyze_sentiment(bad, _sentiment_pipeline=_mock_pipeline_output())
 
-    def test_no_segments_raises_sentiment_error(self, tmp_path: Path):
+    def test_no_segments_returns_empty_result(self, tmp_path: Path):
+        """A transcription with zero segments (e.g. silent audio that
+        Whisper returned nothing for) is a legitimate outcome, not an
+        error. Return an empty SentimentResult so the pipeline records
+        a successful no-op."""
         tx_file = _make_transcription(tmp_path, segments=[])
-        with pytest.raises(SentimentError, match="No usable text"):
-            analyze_sentiment(tx_file, _sentiment_pipeline=_mock_pipeline_output())
+        result = analyze_sentiment(tx_file, _sentiment_pipeline=_mock_pipeline_output())
+        assert result.segments == []
+        assert result.transcription_file == tx_file
 
-    def test_all_empty_text_raises_sentiment_error(self, tmp_path: Path):
+    def test_all_empty_text_returns_empty_result(self, tmp_path: Path):
+        """Same shape — segments exist but have no usable text. Not an error."""
         tx_file = _make_transcription(
             tmp_path,
             segments=[
@@ -186,8 +192,22 @@ class TestAnalyzeSentiment:
                 {"text": "   ", "start": 1.0, "end": 2.0, "words": []},
             ],
         )
-        with pytest.raises(SentimentError, match="No usable text"):
-            analyze_sentiment(tx_file, _sentiment_pipeline=_mock_pipeline_output())
+        result = analyze_sentiment(tx_file, _sentiment_pipeline=_mock_pipeline_output())
+        assert result.segments == []
+
+    def test_all_segments_fail_classification_raises(self, tmp_path: Path):
+        """Real failure case: every segment has text but the pipeline
+        raised on every call. Still a SentimentError."""
+        tx_file = _make_transcription(
+            tmp_path,
+            segments=[
+                {"text": " hello", "start": 0.0, "end": 1.0, "words": []},
+                {"text": " world", "start": 1.0, "end": 2.0, "words": []},
+            ],
+        )
+        failing_pipeline = MagicMock(side_effect=RuntimeError("model crashed"))
+        with pytest.raises(SentimentError, match="All segments failed"):
+            analyze_sentiment(tx_file, _sentiment_pipeline=failing_pipeline)
 
     def test_single_segment_fails_others_succeed(self, tmp_path: Path):
         tx_file = _make_transcription(

@@ -101,18 +101,28 @@ audio-refinery/
 │   ├── gpu_utils.py           # GPU queries via nvidia-smi
 │   ├── notifier.py            # Slack webhook notifications
 │   ├── gpu_tflops.toml        # GPU performance lookup table
-│   └── models/                # Pydantic output models
-│       ├── audio.py           # AudioFileInfo, SeparationResult
-│       ├── diarization.py     # DiarizationResult, SpeakerSegment
-│       ├── transcription.py   # TranscriptionResult, TranscriptSegment, WordSegment
-│       └── sentiment.py       # SentimentResult, SegmentSentiment, SentimentScore
+│   ├── models/                # Pydantic output models
+│   │   ├── audio.py           # AudioFileInfo, SeparationResult
+│   │   ├── diarization.py     # DiarizationResult, SpeakerSegment
+│   │   ├── transcription.py   # TranscriptionResult, TranscriptSegment, WordSegment
+│   │   └── sentiment.py       # SentimentResult, SegmentSentiment, SentimentScore
+│   └── service/               # HTTP service mode (parallel to CLI; same pipeline core)
+│       ├── app.py             # FastAPI app, `audio-refinery-service` entrypoint
+│       ├── auth.py            # Bearer-token middleware
+│       ├── jobs.py            # Job registry, queue, background-thread worker
+│       ├── lifecycle.py       # Model warmup, readiness state, pre-loaded handles
+│       ├── api_schemas.py     # HTTP transport schemas (request/response models)
+│       ├── config.py          # ServiceConfig + PipelineHandles (pure data)
+│       ├── schemas.py         # Combined transcript + batch summary Pydantic schemas
+│       └── uri_io.py          # URI fetch/upload (https://, file://)
 ├── tests/                      # Test suite
 │   ├── conftest.py            # Shared fixtures and GPU mock
 │   ├── test_*.py              # Unit tests
 │   ├── test_integration.py    # GPU-required integration tests
-│   └── models/                # Pydantic model validation tests
+│   ├── models/                # Pydantic model validation tests
+│   └── service/               # Service-mode unit/integration tests
 ├── docs/
-│   └── DEVELOPMENT.md         # This file
+│   └── development.md         # This file
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml             # CI: unit tests + lint + type check
@@ -153,6 +163,10 @@ to be downloaded. They are excluded from CI.
 make test-integration
 ```
 
+Service-mode tests live under `tests/service/`. The unit-level ones run with
+`make test`; the GPU-backed end-to-end ones carry the `integration` marker and
+run with `make test-integration`.
+
 ### Test Coverage
 
 The test suite uses `@pytest.mark.integration` to separate GPU-dependent tests.
@@ -164,6 +178,25 @@ run without GPU access.
 - Minimum 80% code coverage for unit-testable modules
 - All public functions and CLI commands should have unit tests
 - Edge cases and error paths covered
+
+## Running the Service Locally
+
+The HTTP service can run outside a container for fast iteration. It reads the
+same environment variables documented in the [Service Guide](service.md):
+
+```bash
+# REFINERY_API_KEYS is required; HF_TOKEN is needed for diarization.
+REFINERY_API_KEYS=dev-key HF_TOKEN=$HF_TOKEN \
+  REFINERY_LOG_FORMAT=console \
+  audio-refinery serve
+
+# `audio-refinery serve` is equivalent to the `audio-refinery-service` entry point.
+```
+
+Once `GET /health` returns `200`, submit jobs with `file://` URIs against a
+local directory — see the [local development loop](service.md#local-development-loop)
+in the Service Guide. For the full containerized path, build the image with
+`make build-image` and follow the [deployment guide](deployment.md).
 
 ## Code Quality
 

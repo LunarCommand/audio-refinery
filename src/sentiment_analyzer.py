@@ -83,8 +83,11 @@ def analyze_sentiment(
 
     Raises:
         FileNotFoundError: If transcription_file does not exist.
-        SentimentError: If JSON parsing fails, no usable text exists, or all
-            segments fail classification.
+        SentimentError: If JSON parsing fails, or if every segment with text
+            failed classification. Transcriptions with no usable text (e.g.
+            from silent audio) return a ``SentimentResult`` with an empty
+            ``segments`` list rather than raising — silent input is a
+            legitimate outcome, not an error.
     """
     if not transcription_file.exists():
         raise FileNotFoundError(f"Transcription file not found: {transcription_file}")
@@ -126,9 +129,11 @@ def analyze_sentiment(
     processing_time = round(time.monotonic() - t0, 3)
     completed_at = datetime.now(UTC)
 
-    if not segment_results:
-        if not any(seg.text and seg.text.strip() for seg in transcription.segments):
-            raise SentimentError("No usable text found in transcription segments")
+    if not segment_results and any(seg.text and seg.text.strip() for seg in transcription.segments):
+        # There WAS text but every per-segment pipeline call raised — a real
+        # failure. Silent / empty-transcription inputs fall through to the
+        # normal return below with an empty segments list, which is a
+        # legitimate outcome (the file processed; there was nothing to score).
         raise SentimentError("All segments failed sentiment analysis")
 
     return SentimentResult(

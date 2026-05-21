@@ -20,6 +20,14 @@ coverage.xml
 .env
 assets/
 
+# Feature-planning working artifacts (gitignored locally; not part of the image)
+_reqs/
+_plans/
+_docs/
+
+# Local audio fixtures for integration tests (large, host-specific)
+tests/_audio_fixtures/
+
 # Dev tooling
 .pre-commit-config.yaml
 .claude/
@@ -33,7 +41,9 @@ assets/
 .git/
 .github/
 
-# Docs and non-runtime files
+# Docs and non-runtime files. README.md is intentionally NOT excluded —
+# pyproject.toml references it via the `readme` field, and excluding it
+# triggers a setuptools warning at build time.
 docs/
 tests/
 CHANGELOG.md
@@ -41,5 +51,4 @@ CONTRIBUTING.md
 CLAUDE.md
 SECURITY.md
 Makefile
-README.md
 uv.lock

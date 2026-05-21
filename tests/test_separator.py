@@ -113,6 +113,38 @@ class TestSeparate:
         with pytest.raises(FileNotFoundError):
             separate(input_file=Path("/nonexistent/audio.wav"), output_dir=tmp_output_dir)
 
+    def test_subprocess_uses_utf8_with_replace_errors(self, fake_wav, tmp_output_dir, mock_audio_info, mocker):
+        """subprocess.run must specify encoding='utf-8', errors='replace'.
+
+        Demucs's tqdm progress bars contain Unicode glyphs (━, █, em-dashes
+        in log messages). On hosts whose locale resolves to ASCII —
+        common in minimal container images and some CI runners — the
+        default `text=True` decoding crashes with UnicodeDecodeError
+        before subprocess.run returns. Pin the explicit encoding so the
+        captured output is decoded uniformly across hosts."""
+        mocker.patch("src.separator.shutil.which", return_value="/usr/bin/demucs")
+        mocker.patch("src.separator.probe_audio_file", return_value=mock_audio_info)
+
+        # Create expected output files so separate() reaches the post-subprocess
+        # validation step.
+        vocals_path, no_vocals_path = predict_output_paths(fake_wav, tmp_output_dir)
+        vocals_path.parent.mkdir(parents=True)
+        vocals_path.touch()
+        no_vocals_path.touch()
+
+        mock_run = mocker.patch(
+            "src.separator.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="", stderr=""),
+        )
+
+        separate(input_file=fake_wav, output_dir=tmp_output_dir, device="cpu")
+
+        _, kwargs = mock_run.call_args
+        assert kwargs.get("encoding") == "utf-8"
+        assert kwargs.get("errors") == "replace"
+        assert kwargs.get("text") is True
+        assert kwargs.get("capture_output") is True
+
     def test_demucs_failure(self, fake_wav, tmp_output_dir, mock_audio_info, mocker):
         """Raises SeparationError when demucs returns non-zero."""
         mocker.patch("src.separator.shutil.which", return_value="/usr/bin/demucs")

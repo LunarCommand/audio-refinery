@@ -1,5 +1,9 @@
 assets/
 .claude/
+_reqs/
+_docs/
+_plans/
+tests/_audio_fixtures/
 
 # Python
 .venv/
