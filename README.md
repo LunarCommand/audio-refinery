@@ -96,7 +96,7 @@ flowchart TD
     SVC --> CORE
     subgraph CORE [core pipeline]
         direction LR
-        SEP[separate] --> DIA[diarize] --> TRX[transcribe] --> SEN[sentiment]
+        SEP[separate] --> DIA[diarize] --> TRX[transcribe] --> SEN["sentiment (optional)"]
     end
 ```
 
