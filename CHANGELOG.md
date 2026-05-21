@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-20
+
+### Fixed
+
+- Service mode now pins `CUDA_DEVICE_ORDER=PCI_BUS_ID` at startup (matching the CLI), so `REFINERY_DEVICE=cuda:N` selects the GPU at `nvidia-smi` index N rather than CUDA's default FASTEST_FIRST ordering. Previously a multi-GPU host could load models onto the wrong card.
+
+### Documentation
+
+- Corrected the service-mode tmpfs example to `--mount type=tmpfs,dst=/scratch,tmpfs-mode=1777`. A bare `--tmpfs /scratch` mounts root-owned, so the non-root `refinery` user could not write scratch and every job failed with `PermissionError`. Applied the same fix in `docs/deployment.md`.
+- Added service-mode GPU-selection guidance, an end-to-end local-directory batch runbook, and troubleshooting entries (tmpfs permissions, wrong-GPU selection, batch-size cap) to `docs/service.md`.
+- Added the project banner to the README.
+
 ## [0.2.0] - 2026-05-20
 
 ### Added
