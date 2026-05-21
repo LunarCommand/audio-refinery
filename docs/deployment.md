@@ -1,15 +1,26 @@
 # Deployment
 
-This document covers running audio-refinery in production: sustained unattended batch runs,
-integration with larger systems via an async worker pattern, containerization for cloud
-deployments, and operational monitoring.
+Audio Refinery deploys in two shapes:
 
-## Single-Machine Production Setup
+- **CLI deployment** — sustained, unattended batch runs over a directory of WAV
+  files on a GPU workstation or a single cloud instance. Best when you control
+  the input directory and want to process a corpus.
+- **Service deployment** — the containerized HTTP service for programmatic,
+  asynchronous job submission (URI-in / URI-out). Best when jobs arrive from
+  other systems or you need to scale behind an orchestrator.
 
-For sustained batch processing on a local GPU workstation, a few practices make long-running
-jobs reliable and recoverable.
+Both run the same core pipeline. This guide covers operating each in production;
+for the service's API surface and environment-variable reference, see the
+[Service Guide](service.md).
 
-### Environment and Startup
+---
+
+## CLI deployment (workstation batch)
+
+For sustained batch processing on a local GPU workstation, a few practices make
+long-running jobs reliable and recoverable.
+
+### Environment and startup
 
 ```bash
 # Activate the virtualenv
@@ -19,17 +30,22 @@ source /path/to/audio-refinery/.venv/bin/activate
 audio-refinery pipeline --base-dir /data/audio/batch
 ```
 
-The pipeline runs a GPU pre-flight check before loading any models. If active processes are
-found on the target GPU, it prints the PID and VRAM footprint of each and asks for confirmation
-before proceeding. This prevents inadvertently loading models onto a GPU already under load.
+The pipeline runs a GPU pre-flight check before loading any models. If active
+processes are found on the target GPU, it prints the PID and VRAM footprint of
+each and asks for confirmation before proceeding. This prevents inadvertently
+loading models onto a GPU already under load.
 
-### RAM Disk
+### Scratch directory (RAM disk)
 
-Mount a tmpfs before starting any batch run that uses the default Demucs output directory:
+The Demucs scratch directory resolves to `$REFINERY_SCRATCH_DIR/demucs` when set,
+or `tempfile.gettempdir()/audio-refinery-demucs` (typically `/tmp`) otherwise.
+For heavy batch runs, point it at a tmpfs RAM disk to avoid SSD write
+amplification:
 
 ```bash
 sudo mkdir -p /mnt/fast_scratch
 sudo mount -t tmpfs -o size=32G,mode=1777 tmpfs /mnt/fast_scratch
+export REFINERY_SCRATCH_DIR=/mnt/fast_scratch
 ```
 
 To persist across reboots, add to `/etc/fstab`:
@@ -38,12 +54,14 @@ To persist across reboots, add to `/etc/fstab`:
 tmpfs /mnt/fast_scratch tmpfs defaults,size=32G,mode=1777 0 0
 ```
 
-Size the RAM disk to at least 2× the largest expected file's stem output (~400 MB for a typical
-5–8 minute file). 8–32 GB provides comfortable headroom for longer recordings.
+Size the RAM disk to at least 2× the largest expected file's stem output (~400 MB
+for a typical 5–8 minute file). 8–32 GB provides comfortable headroom for longer
+recordings.
 
-See [architecture.md](architecture.md) for the rationale behind the RAM disk strategy.
+See [architecture.md](architecture.md) for the rationale behind the RAM disk
+strategy, and [cli.md](cli.md#scratch-directory) for per-invocation overrides.
 
-### Running a Batch
+### Running a batch
 
 ```bash
 # Standard batch run
@@ -62,11 +80,11 @@ nohup audio-refinery pipeline \
   > /data/audio/batch/logs/pipeline.log 2>&1 &
 ```
 
-### Resume and Recovery
+### Resume and recovery
 
-The pipeline skips files whose output already exists and is non-empty. An interrupted run —
-due to power loss, thermal shutdown, or manual termination — can be restarted with the same
-command. Completed files are not reprocessed.
+The pipeline skips files whose output already exists and is non-empty. An
+interrupted run — due to power loss, thermal shutdown, or manual termination —
+can be restarted with the same command. Completed files are not reprocessed.
 
 ```bash
 # Resume an interrupted run (default behavior — no flags needed)
@@ -78,140 +96,33 @@ audio-refinery pipeline --base-dir /data/audio/batch --no-resume
 
 ---
 
-## Async Worker Pattern
+## Service deployment (HTTP API)
 
-For applications that need to submit audio processing jobs programmatically and retrieve results
-asynchronously, audio-refinery can be deployed as a headless worker backed by a job queue.
+The HTTP service is the supported path for programmatic, asynchronous job
+submission. It provides a job queue, a background worker, readiness probes, and
+URI-driven I/O out of the box — so you no longer need to build your own
+database-as-queue worker around the CLI. See the [Service Guide](service.md) for
+the full endpoint reference, output schemas, and environment-variable table.
 
-### Why Not a Synchronous API
+### Container prerequisites
 
-Audio processing time is non-deterministic and can range from seconds to minutes per file
-depending on duration and diarization complexity. Blocking an HTTP request for this duration
-leads to timeouts, poor resource management, and fragile client logic.
+#### HuggingFace token
 
-The recommended pattern is a **database-as-queue**: a client inserts job records; the worker
-polls, locks, and processes them; results are written back to the database.
-
-### PostgreSQL Job Queue Schema
-
-```sql
-CREATE TABLE refinery_jobs (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | processing | completed | failed
-    input_path  TEXT NOT NULL,
-    output_dir  TEXT NOT NULL,
-    device      TEXT NOT NULL DEFAULT 'cuda',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at  TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    result_json JSONB,
-    error_msg   TEXT
-);
-
-CREATE INDEX ON refinery_jobs (status, created_at);
-```
-
-### Worker Loop Pattern
-
-```python
-import time
-import json
-from pathlib import Path
-from sqlalchemy import create_engine, text
-
-from src.separator import separate
-from src.diarizer import diarize
-from src.transcriber import transcribe
-
-engine = create_engine("postgresql://user:pass@localhost/mydb")
-
-def claim_job(conn):
-    """Atomically claim the oldest queued job."""
-    row = conn.execute(text("""
-        UPDATE refinery_jobs
-        SET status = 'processing', started_at = now()
-        WHERE id = (
-            SELECT id FROM refinery_jobs
-            WHERE status = 'queued'
-            ORDER BY created_at
-            LIMIT 1
-            FOR UPDATE SKIP LOCKED
-        )
-        RETURNING id, input_path, output_dir, device
-    """)).fetchone()
-    conn.commit()
-    return row
-
-def run_worker():
-    while True:
-        with engine.connect() as conn:
-            job = claim_job(conn)
-            if job is None:
-                time.sleep(5)
-                continue
-
-            try:
-                sep = separate(job.input_path, output_dir=job.output_dir, device=job.device)
-                diar = diarize(sep.vocals_path, device=job.device)
-                tx = transcribe(sep.vocals_path, diarization=diar, device=job.device)
-
-                conn.execute(text("""
-                    UPDATE refinery_jobs
-                    SET status = 'completed', completed_at = now(), result_json = :result
-                    WHERE id = :id
-                """), {"id": job.id, "result": json.dumps(tx.model_dump())})
-                conn.commit()
-
-            except Exception as exc:
-                conn.execute(text("""
-                    UPDATE refinery_jobs
-                    SET status = 'failed', completed_at = now(), error_msg = :err
-                    WHERE id = :id
-                """), {"id": job.id, "err": str(exc)})
-                conn.commit()
-```
-
-The `FOR UPDATE SKIP LOCKED` clause ensures that multiple worker processes can pull from the
-same queue without racing on the same job — a second worker process on a different GPU skips
-any row that the first worker has already locked.
-
-### Submitting Jobs
-
-```python
-with engine.connect() as conn:
-    conn.execute(text("""
-        INSERT INTO refinery_jobs (input_path, output_dir, device)
-        VALUES (:input, :output, :device)
-    """), {"input": "/data/audio/file.wav", "output": "/data/results", "device": "cuda:0"})
-    conn.commit()
-```
-
----
-
-## Docker Containerization
-
-Containerizing audio-refinery ensures that the PyTorch 2.1.2 + CUDA 12.1 dependency stack is
-portable and reproducible across machines. The same image runs on a local GPU workstation and
-on a cloud GPU instance — the difference is how the image is built and delivered, and what
-scratch storage is available.
-
-### Prerequisites
-
-#### HuggingFace Token
-
-Pyannote speaker diarization uses gated models that require HuggingFace authentication:
+Pyannote speaker diarization uses gated models that require HuggingFace
+authentication:
 
 1. Create a free account at [huggingface.co](https://huggingface.co)
 2. Accept the model terms for [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
 3. Generate a read token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 
-Pass the token via `-e HF_TOKEN` or the compose `environment:` block. Without it the diarization
-stage will fail with a 401 authentication error the first time it tries to download the model.
+Pass the token via `-e HF_TOKEN` or the compose `environment:` block. Without it
+the diarization stage fails with a 401 the first time it tries to download the
+model.
 
-#### NVIDIA Driver Version
+#### NVIDIA driver version
 
-The `nvidia/cuda:12.1.1` base image requires **NVIDIA driver ≥ 525.85.12** on the host.
-Check before pulling the image:
+The `nvidia/cuda:12.1.1` base image requires **NVIDIA driver ≥ 525.85.12** on the
+host. Check before pulling:
 
 ```bash
 nvidia-smi --query-gpu=driver_version --format=csv,noheader
@@ -221,9 +132,10 @@ If the driver is older than 525, update it before proceeding.
 
 #### NVIDIA Container Toolkit
 
-Docker cannot access the GPU without the NVIDIA Container Toolkit installed and configured on
-the host. This applies to both local workstations and cloud instances — most cloud GPU images
-include NVIDIA drivers but not the container toolkit.
+Docker cannot access the GPU without the NVIDIA Container Toolkit installed and
+configured on the host. This applies to both local workstations and cloud
+instances — most cloud GPU images include NVIDIA drivers but not the container
+toolkit.
 
 ```bash
 # Install the toolkit (Ubuntu / Debian)
@@ -245,178 +157,96 @@ Verify GPU access inside a container before building:
 docker run --rm --gpus all nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
 ```
 
-This should print the same `nvidia-smi` output as the host. If it fails, the toolkit is not
-installed correctly — audio-refinery will not be able to use the GPU inside the container.
+This should print the same `nvidia-smi` output as the host. If the toolkit was
+configured via CDI and the spec is stale after a driver upgrade, regenerate it
+with `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`.
 
-### Dockerfile
+### Building the image
 
-```dockerfile
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
-
-# System dependencies
-RUN apt-get update && apt-get install -y \
-    python3.11 python3.11-dev python3-pip python3.11-venv \
-    ffmpeg git curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Non-root user
-RUN useradd -m -u 1000 refinery
-WORKDIR /app
-USER refinery
-
-# Install uv
-RUN pip install --user uv
-
-# Copy and install the package (resolves main deps; may pull CPU-only torch)
-COPY --chown=refinery:refinery . .
-RUN uv pip install -e .
-
-# Install WhisperX at the pinned commit — no-deps to avoid overwriting torch
-# v3.1.1 tag has the old API without device_index; use the correct commit instead
-RUN uv pip install --no-deps \
-    "whisperx @ git+https://github.com/m-bain/whisperX.git@741ab9a2a8a1076c171e785363b23c55a91ceff1"
-
-# Install pinned WhisperX runtime deps
-# transformers must stay <4.40.0 — 4.40+ uses torch.utils._pytree.register_pytree_node
-# which was added in PyTorch 2.2 and breaks with the pinned 2.1.2
-RUN uv pip install \
-    "av==16.1.0" "ctranslate2==4.7.1" "faster-whisper==1.2.1" \
-    "flatbuffers==25.12.19" "nltk==3.9.2" "onnxruntime==1.24.1" \
-    "transformers>=4.30.0,<4.40.0"
-
-# Reinstall PyTorch with CUDA 12.1 wheels last — uv pip install -e . above may have
-# pulled CPU-only builds; this guarantees the CUDA wheel is what's actually used
-RUN uv pip install torch==2.1.2+cu121 torchaudio==2.1.2+cu121 \
-    --extra-index-url https://download.pytorch.org/whl/cu121
-
-CMD ["audio-refinery", "--help"]
-```
-
-### Building the Image
+The repository ships a multi-stage [`Dockerfile`](../Dockerfile) (CUDA runtime
+base, non-root `refinery` user, all WhisperX pins baked in). Build it with the
+Makefile target:
 
 ```bash
-docker build -t audio-refinery:latest .
+make build-image          # builds lunarcommand/audio-refinery:latest
 ```
 
-The build clones WhisperX from GitHub and downloads PyTorch CUDA wheels, so it requires internet
-access and takes 10–20 minutes on first run. Subsequent builds are faster due to layer caching,
-provided `pyproject.toml` has not changed.
+The build clones WhisperX from a pinned commit and downloads PyTorch CUDA
+wheels, so it requires internet access and takes 10–20 minutes on first run.
+Subsequent builds reuse layer caching. Released images are published to Docker
+Hub as `lunarcommand/audio-refinery:<version>`.
 
----
-
-### Running Locally (Workstation)
-
-For a local GPU workstation, build the image once and run it via compose for sustained batch
-runs, or `docker run` for one-off jobs. Audio data and the RAM disk are bind-mounted from the
-host, so the container has no persistent state of its own.
-
-**Sustained batch — docker-compose.yml:**
-
-```yaml
-services:
-  refinery:
-    build: .
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ['0']       # Pin to specific GPU by PCI ID
-              capabilities: [gpu]
-    volumes:
-      - /data/audio:/data                          # Persistent audio storage
-      - /mnt/fast_scratch:/mnt/fast_scratch        # RAM disk (mount on host first)
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
-    command: >
-      audio-refinery pipeline
-        --base-dir /data/batch
-        --compute-type int8_float16
-```
-
-**Ad-hoc run:**
+### Running the service container
 
 ```bash
-docker run --rm --gpus '"device=0"' \
-  -v /data/audio:/data \
-  -v /mnt/fast_scratch:/mnt/fast_scratch \
+docker run --gpus all -p 8000:8000 \
+  -e REFINERY_API_KEYS=your-secret-key \
   -e HF_TOKEN="${HF_TOKEN}" \
-  -e SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}" \
-  audio-refinery:latest \
-  audio-refinery pipeline --base-dir /data/batch --compute-type int8_float16
+  --tmpfs /scratch -e REFINERY_SCRATCH_DIR=/scratch \
+  lunarcommand/audio-refinery:latest
 ```
 
-`--gpus '"device=0"'` pins to a specific GPU by index. Use `--gpus all` to expose all GPUs.
+The default `CMD` is `audio-refinery-service`. `/health` returns `503` until
+warmup finishes, then `200`. See the [Service Guide quickstart](service.md#quickstart)
+for submitting jobs and the [environment-variable table](service.md#environment-variables)
+for all `REFINERY_*` knobs.
 
----
+### Orchestrators (Kubernetes / ECS)
 
-### Deploying to the Cloud
+Wire `/health` to a readiness probe so traffic only arrives once the container
+can serve it. Run one container per GPU and scale horizontally — there is no
+in-container parallelism to tune. Mount a persistent volume at
+`/home/refinery/.cache` to avoid re-downloading model weights on every start.
+Probe config snippets are in the [Service Guide operations section](service.md#operations).
 
-Cloud deployment follows the same container pattern as local, with two differences: the image
-is delivered via a registry rather than built in place, and NVMe instance storage substitutes
-for the RAM disk.
+### Cloud registry workflow
 
-#### Instance Selection
-
-The recommended minimum is a **24 GB GPU** to hold all models resident simultaneously. On a
-10–12 GB GPU, models are loaded and unloaded between stages, adding 10–30 seconds of overhead
-per file. See [VRAM Footprint by Stage](#vram-footprint-by-stage) for a full breakdown.
-
-Common instance types that meet the 24 GB threshold: NVIDIA A10G (AWS g5), L4 (GCP g2), RTX
-3090 / 4090 (bare metal providers).
-
-#### Registry Workflow
-
-Build and push from your local machine (or a CI runner), then pull on the cloud instance:
+Build and push from a local machine or CI runner, then pull on the cloud
+instance:
 
 ```bash
-# Build and push (local machine)
+# Build and push
 docker build -t your-registry/audio-refinery:latest .
 docker push your-registry/audio-refinery:latest
 
-# Pull and run (cloud instance — after completing Prerequisites above)
+# Pull and run (cloud instance — after completing prerequisites above)
 docker pull your-registry/audio-refinery:latest
+docker run --gpus all -p 8000:8000 \
+  -e REFINERY_API_KEYS=your-secret-key \
+  -e HF_TOKEN="${HF_TOKEN}" \
+  your-registry/audio-refinery:latest
+```
+
+The recommended minimum is a **24 GB GPU** to hold all models resident
+simultaneously (see [VRAM footprint by stage](#vram-footprint-by-stage)). Common
+instance types: NVIDIA A10G (AWS g5), L4 (GCP g2), RTX 3090 / 4090 (bare metal).
+
+### Running the CLI in a container
+
+The same image can run a one-shot CLI batch instead of the service by overriding
+the command — useful for containerized batch jobs over a bind-mounted directory:
+
+```bash
 docker run --rm --gpus '"device=0"' \
   -v /data/audio:/data \
-  -v /mnt/nvme:/mnt/fast_scratch \
+  --tmpfs /scratch -e REFINERY_SCRATCH_DIR=/scratch \
   -e HF_TOKEN="${HF_TOKEN}" \
   -e SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}" \
-  your-registry/audio-refinery:latest \
+  lunarcommand/audio-refinery:latest \
   audio-refinery pipeline --base-dir /data/batch --compute-type int8_float16
 ```
 
-Alternatively, build directly on the cloud instance if it has internet access and you want to
-skip managing a registry:
-
-```bash
-git clone https://github.com/LunarCommand/audio-refinery.git
-cd audio-refinery
-docker build -t audio-refinery:latest .
-```
-
-#### Scratch Storage
-
-Cloud GPU instances do not have a RAM disk. Use a high-bandwidth NVMe instance volume as scratch:
-
-```bash
-# Mount instance NVMe storage (device path varies by provider)
-sudo mkdir -p /mnt/nvme
-sudo mount /dev/nvme1n1 /mnt/nvme
-```
-
-Pass `/mnt/nvme` as the scratch bind mount (`-v /mnt/nvme:/mnt/fast_scratch`). Cloud NVMe
-instance storage typically provides 2–4 GB/s write throughput — adequate as a scratch substitute
-at the cost of some SSD wear.
+`--gpus '"device=0"'` pins to a specific GPU by index; use `--gpus all` for all GPUs.
 
 ---
 
 ## Monitoring
 
-### GPU Temperature
+### GPU temperature
 
-The pipeline monitors GPU temperature automatically during batch runs. The progress bar
-description shows the current temperature, color-coded relative to `--temp-limit` (default 80°C):
+The pipeline monitors GPU temperature automatically during batch runs. The
+progress bar description shows the current temperature, color-coded relative to
+`--temp-limit` (default 80°C):
 
 | Color  | Condition                             |
 |--------|---------------------------------------|
@@ -424,8 +254,10 @@ description shows the current temperature, color-coded relative to `--temp-limit
 | Yellow | Within 10°C of limit (watch it)       |
 | Red    | At or above limit (shutdown imminent) |
 
-If the temperature exceeds the limit, the pipeline shuts down gracefully. Completed files are
-preserved; the run can be resumed after the GPU cools.
+If the temperature exceeds the limit, the pipeline shuts down gracefully.
+Completed files are preserved; the run can be resumed after the GPU cools. In
+service mode the same guard is opt-in via `REFINERY_GPU_TEMP_LIMIT` (see the
+[Service Guide](service.md#environment-variables)).
 
 ```bash
 # Tighten the thermal limit for a warm environment
@@ -435,7 +267,7 @@ audio-refinery pipeline --base-dir /data/batch --temp-limit 75
 audio-refinery pipeline --base-dir /data/batch --temp-limit 0
 ```
 
-### Continuous nvidia-smi Logging
+### Continuous nvidia-smi logging
 
 For sustained multi-day runs, log GPU utilization and temperature to a file:
 
@@ -449,26 +281,26 @@ audio-refinery pipeline --base-dir /data/batch
 kill $MONITOR_PID
 ```
 
-### Slack Notifications
+### Slack notifications
 
-Set `SLACK_WEBHOOK_URL` in `.env` to receive notifications when a pipeline run completes or
-shuts down due to a thermal event:
+Set `SLACK_WEBHOOK_URL` (in `.env` for the CLI, or `-e` for the container) to
+receive notifications when a run completes or shuts down due to a thermal event:
 
 ```
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
 ```
 
-Notifications are fire-and-forget. A delivery failure never blocks or aborts the pipeline.
+Notifications are fire-and-forget. A delivery failure never blocks or aborts
+processing.
 
 ---
 
-## VRAM Lifecycle Management
+## VRAM lifecycle management
 
-Models loaded into GPU VRAM can leave fragmented allocations between stages. For long-running
-deployments (async workers, multi-day batch jobs), explicit VRAM cleanup between pipeline runs
-prevents gradual memory pressure from accumulating.
-
-If integrating audio-refinery stages directly into a Python process rather than through the CLI:
+Models loaded into GPU VRAM can leave fragmented allocations between stages. The
+CLI pipeline and the service worker both handle cleanup between files
+automatically. Explicit cleanup is only relevant if you embed stage functions
+directly in a long-lived Python process of your own:
 
 ```python
 import gc
@@ -484,10 +316,7 @@ gc.collect()
 torch.cuda.empty_cache()
 ```
 
-The CLI pipeline handles this automatically between files. It is only relevant when embedding
-stage functions directly in a long-lived process.
-
-### VRAM Footprint by Stage
+### VRAM footprint by stage
 
 These figures are approximate on a default `large-v3` configuration:
 
@@ -498,5 +327,6 @@ These figures are approximate on a default `large-v3` configuration:
 | Transcription                    | WhisperX large-v3 |  ~10 GB   |
 | All models loaded simultaneously | —                 |  ~15 GB   |
 
-A 24 GB GPU comfortably holds all three models resident simultaneously. On a 10–12 GB GPU,
-models must be loaded and unloaded between stages, adding ~10–30 seconds of overhead per file.
+A 24 GB GPU comfortably holds all three models resident simultaneously. On a
+10–12 GB GPU, models must be loaded and unloaded between stages, adding ~10–30
+seconds of overhead per file.
