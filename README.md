@@ -88,17 +88,16 @@ CLI users should also review the [scratch directory](docs/cli.md#scratch-directo
 
 Both entry points are thin callers around one shared pipeline core:
 
-```
-        CLI (audio-refinery)              Service (HTTP API)
-   one-shot / batch over a directory   async jobs, URI-in / URI-out
-                    \                        /
-                     \                      /
-                      v                    v
-            ┌───────────────────────────────────────┐
-            │              core pipeline              │
-            │  separate → diarize → transcribe → …    │
-            │     (Demucs, Pyannote, WhisperX)        │
-            └───────────────────────────────────────┘
+```mermaid
+flowchart TD
+    CLI["CLI — audio-refinery<br/>one-shot / batch over a directory"]
+    SVC["Service — HTTP API<br/>async jobs, URI-in / URI-out"]
+    CLI --> CORE
+    SVC --> CORE
+    subgraph CORE [core pipeline]
+        direction LR
+        SEP[separate] --> DIA[diarize] --> TRX[transcribe] --> SEN[sentiment]
+    end
 ```
 
 The CLI loads models per invocation; the service loads them once at container
