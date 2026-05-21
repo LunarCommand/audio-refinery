@@ -14,25 +14,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg git curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root runtime user
-RUN useradd -m -u 1000 refinery
-WORKDIR /app
-USER refinery
+# Create the runtime user and the dirs the runtime needs to own. Installs
+# below run as root (the only user that can write to /usr/lib/python3.11
+# system site-packages and /app for editable installs); the final USER
+# switch at the bottom hands the runtime over to a non-privileged account.
+RUN useradd -m -u 1000 refinery \
+    && mkdir -p /app /scratch \
+    && chown refinery:refinery /app /scratch
 
-# Install uv into the refinery user's PATH. The pip running this command is
-# python3-pip (the apt-installed Ubuntu default — python3.10 on jammy), but
-# uv itself is a Rust binary and doesn't care which Python installed it.
-RUN pip install --user uv
-ENV PATH="/home/refinery/.local/bin:${PATH}"
+# Install uv as a Rust binary; doesn't depend on which Python installed it.
+RUN pip install uv
 
-# Make every `uv pip install` use python3.11 regardless of which `python3`
-# the OS defaults to. The base image's `python3` is 3.10; without this, uv's
-# `--system` flag would resolve to 3.10 and fail dependency resolution
-# (pyproject.toml pins requires-python = ">=3.11,<3.12").
+# Pin every `uv pip install` to python3.11. The base image's `python3` is
+# 3.10; without this, uv's `--system` would resolve to 3.10 and fail
+# dependency resolution (pyproject.toml requires-python = ">=3.11,<3.12").
 ENV UV_PYTHON=python3.11
 
+WORKDIR /app
+
 # Copy and install the package (resolves main deps; may pull CPU-only torch)
-COPY --chown=refinery:refinery . .
+COPY . .
 RUN uv pip install --system -e .
 
 # Install WhisperX at the pinned commit — no-deps to avoid overwriting torch.
@@ -54,16 +55,21 @@ RUN uv pip install --system \
 RUN uv pip install --system torch==2.1.2+cu121 torchaudio==2.1.2+cu121 \
     --extra-index-url https://download.pytorch.org/whl/cu121
 
+# Fix ownership of the editable-install artifacts (egg-info, etc.) so the
+# refinery user can read them at runtime. site-packages stays root-owned;
+# Python's default read perms (755) cover the import path fine.
+RUN chown -R refinery:refinery /app
+
 # Per-job Demucs scratch lives here. The directory is declared as a VOLUME
 # so operators can bind a tmpfs mount (recommended on RAM-rich hosts for the
 # RAM-disk benefit Demucs throughput likes) or a fast disk on RAM-tight VMs.
 # The env var is honored by `tempfile.TemporaryDirectory(dir=...)` in the
 # worker. Unset REFINERY_SCRATCH_DIR to fall back to the system /tmp.
-USER root
-RUN mkdir -p /scratch && chown refinery:refinery /scratch
-USER refinery
 ENV REFINERY_SCRATCH_DIR=/scratch
 VOLUME ["/scratch"]
+
+# Drop to the non-privileged runtime user.
+USER refinery
 
 # Service mode binds REFINERY_PORT (default 8000) on all interfaces.
 EXPOSE 8000
