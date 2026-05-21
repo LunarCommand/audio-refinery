@@ -1855,3 +1855,19 @@ def pipeline_parallel(
         failed_logs = "\n".join(f"  {w['log']}" for w in workers)
         console.print(f"[dim]Worker logs retained for inspection:[/dim]\n{failed_logs}")
         sys.exit(1)
+
+
+@cli.command("serve")
+def serve():
+    """Run the HTTP service (equivalent to `audio-refinery-service`).
+
+    Configuration is read entirely from environment variables — see
+    docs/service.md for the full reference. This subcommand is a convenience
+    wrapper so local-dev users can stay on a single binary name. The
+    production container CMD still invokes `audio-refinery-service` directly.
+    """
+    # Lazy import so the rest of the CLI doesn't pay the FastAPI/uvicorn
+    # import cost on every `audio-refinery --help` or pipeline invocation.
+    from src.service.app import run
+
+    run()
