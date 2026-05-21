@@ -204,7 +204,7 @@ Real-world end-to-end speedup for mixed audio pipelines on H100 vs. RTX 4090 is 
 0.5 days × 24 hr × $2.50/hr ≈ **~$30**
 
 For cloud deployment, the pipeline's PyTorch 2.1.2 + CUDA 12.1 dependency stack should be
-containerized. See [DEPLOYMENT.md](DEPLOYMENT.md) for containerization guidance.
+containerized. See [deployment.md](deployment.md) for containerization guidance.
 
 ## Combined Scenario Matrix
 

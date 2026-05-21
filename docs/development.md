@@ -122,7 +122,7 @@ audio-refinery/
 │   ├── models/                # Pydantic model validation tests
 │   └── service/               # Service-mode unit/integration tests
 ├── docs/
-│   └── DEVELOPMENT.md         # This file
+│   └── development.md         # This file
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml             # CI: unit tests + lint + type check

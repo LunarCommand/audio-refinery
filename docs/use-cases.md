@@ -138,4 +138,4 @@ word counts, turn-taking patterns, sentiment distributions, and other conversati
 | Large content backlog          | 500–5,000+ | Multi-GPU (pipeline-parallel) or cloud burst |
 | Ongoing incremental processing | continuous | Single GPU + resume behavior                 |
 
-See [PERFORMANCE.md](PERFORMANCE.md) for detailed throughput figures and scaling options.
+See [performance.md](performance.md) for detailed throughput figures and scaling options.

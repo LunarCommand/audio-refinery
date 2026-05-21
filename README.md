@@ -662,11 +662,11 @@ Notifications are fire-and-forget — a failure to deliver never blocks or abort
 
 | Document                             | Description                                                        |
 |--------------------------------------|--------------------------------------------------------------------|
-| [Architecture](docs/ARCHITECTURE.md) | Ghost Track pipeline design, model selection rationale, data model |
-| [Use Cases](docs/USE_CASES.md)       | Who uses this and for what                                         |
-| [Performance](docs/PERFORMANCE.md)   | Throughput benchmarks, scaling options, optimization guide         |
-| [Deployment](docs/DEPLOYMENT.md)     | Production patterns, async workers, Docker, monitoring             |
-| [Development](docs/DEVELOPMENT.md)   | Dev setup, testing, contributing, release process                  |
+| [Architecture](docs/architecture.md) | Ghost Track pipeline design, model selection rationale, data model |
+| [Use Cases](docs/use-cases.md)       | Who uses this and for what                                         |
+| [Performance](docs/performance.md)   | Throughput benchmarks, scaling options, optimization guide         |
+| [Deployment](docs/deployment.md)     | Production patterns, async workers, Docker, monitoring             |
+| [Development](docs/development.md)   | Dev setup, testing, contributing, release process                  |
 
 ---
 

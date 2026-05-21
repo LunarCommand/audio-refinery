@@ -41,7 +41,7 @@ tmpfs /mnt/fast_scratch tmpfs defaults,size=32G,mode=1777 0 0
 Size the RAM disk to at least 2× the largest expected file's stem output (~400 MB for a typical
 5–8 minute file). 8–32 GB provides comfortable headroom for longer recordings.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the rationale behind the RAM disk strategy.
+See [architecture.md](architecture.md) for the rationale behind the RAM disk strategy.
 
 ### Running a Batch
 
