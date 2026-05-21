@@ -127,16 +127,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Sync Docker Hub description
-        # Keeps the Docker Hub repo overview + short description in lockstep with
-        # the repo so they don't drift. Uses the same DOCKERHUB_* secrets; the
-        # token needs Read & Write. If Docker Hub rejects a PAT for the
-        # description API, supply an account password secret instead.
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa  # v5.0.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: lunarcommand/audio-refinery
-          short-description: "GPU audio pipeline: separation, diarization, WhisperX transcription, sentiment — HTTP service"
-          readme-filepath: ./docs/dockerhub-overview.md
