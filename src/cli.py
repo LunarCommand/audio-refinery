@@ -288,7 +288,7 @@ def separate_cmd(input_file: str, output_dir: str, device: str, segment: int | N
 @click.option(
     "--hf-token",
     default=None,
-    help="HuggingFace token (overrides HF_TOKEN env var).",
+    help="Hugging Face token (overrides HF_TOKEN env var).",
 )
 @click.option(
     "-o",
@@ -537,7 +537,7 @@ def transcribe_cmd(
     "--model",
     default="cardiffnlp/twitter-roberta-base-sentiment-latest",
     show_default=True,
-    help="HuggingFace text-classification model name.",
+    help="Hugging Face text-classification model name.",
 )
 @click.option(
     "-d",
@@ -711,7 +711,7 @@ def sentiment_cmd(transcription_file: str, model: str, device: str, output_file:
 @click.option(
     "--hf-token",
     default=None,
-    help="HuggingFace token for Pyannote (overrides HF_TOKEN env var).",
+    help="Hugging Face token for Pyannote (overrides HF_TOKEN env var).",
 )
 @click.option(
     "--no-resume",
@@ -730,7 +730,7 @@ def sentiment_cmd(transcription_file: str, model: str, device: str, output_file:
     default="large-v3",
     show_default=True,
     help=(
-        "WhisperX model name. Any valid HuggingFace model name is accepted. "
+        "WhisperX model name. Any valid Hugging Face model name is accepted. "
         "Well-tested variants: large-v3 (default, highest accuracy), "
         "distil-large-v3 (~2× faster, minimal accuracy delta), "
         "medium.en (~3.2× faster, English-only), medium (~3× faster, multilingual)."
@@ -1328,7 +1328,7 @@ def pipeline(
 @click.option(
     "--hf-token",
     default=None,
-    help="HuggingFace token for Pyannote (overrides HF_TOKEN env var).",
+    help="Hugging Face token for Pyannote (overrides HF_TOKEN env var).",
 )
 @click.option(
     "--no-resume",

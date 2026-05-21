@@ -123,7 +123,7 @@ def integration_transcription(integration_vocals, tmp_path):
 
 
 def test_real_sentiment(integration_transcription, tmp_path):
-    """Run real HuggingFace sentiment analysis on a transcription and verify output."""
+    """Run real Hugging Face sentiment analysis on a transcription and verify output."""
     result = analyze_sentiment(integration_transcription, device="cpu")
 
     assert len(result.segments) > 0

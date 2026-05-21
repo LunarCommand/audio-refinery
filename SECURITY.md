@@ -24,5 +24,5 @@ Security issues relevant to this project include:
 
 ## Out of Scope
 
-- Issues in third-party models (Demucs, Pyannote, WhisperX, HuggingFace) — report those upstream
+- Issues in third-party models (Demucs, Pyannote, WhisperX, Hugging Face) — report those upstream
 - Issues requiring physical access to the machine running the pipeline

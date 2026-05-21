@@ -124,7 +124,7 @@ WhisperX augments Whisper with a forced alignment stage:
 The combination of these three outputs — text, word-level timestamps, and speaker labels — is
 what makes the `TranscriptionResult` JSON useful for downstream search, editing, and analysis.
 
-### Stage 4: Sentiment Analysis (HuggingFace Transformers)
+### Stage 4: Sentiment Analysis (Hugging Face Transformers)
 
 **Model:** `cardiffnlp/twitter-roberta-base-sentiment-latest` (default; configurable)
 

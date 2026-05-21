@@ -232,7 +232,7 @@ batch outcomes.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `REFINERY_API_KEYS` | **required** | Comma-separated allowlist of accepted bearer tokens. The service exits at startup if unset. |
-| `HF_TOKEN` | **required for diarization** | HuggingFace token for the gated Pyannote models. |
+| `HF_TOKEN` | **required for diarization** | Hugging Face token for the gated Pyannote models. |
 | `REFINERY_DEVICE` | `cuda` | Compute device: `cpu`, `cuda`, or `cuda:N`. |
 | `REFINERY_WHISPER_MODEL` | `large-v3` | WhisperX model. Variants: `distil-large-v3`, `medium.en`, `medium`. Fixed for the container's lifetime. |
 | `REFINERY_COMPUTE_TYPE` | `float16` | CTranslate2 compute type: `float16`, `int8_float16`, `int8`, `float32`. |

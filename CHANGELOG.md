@@ -66,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Centralized Demucs scratch directory resolution in CLI — RAM disk detection and fallback confirmation now happen in one place
 - Worker status reporting and failure aggregation in `pipeline-parallel` refactored for improved accuracy
 - `python-dotenv` import in Slack notifier is now conditional — avoids import-time failure when the package is absent
-- DEPLOYMENT.md expanded: HuggingFace token setup, NVIDIA driver requirements, cloud instance guidelines, and Docker usage
+- DEPLOYMENT.md expanded: Hugging Face token setup, NVIDIA driver requirements, cloud instance guidelines, and Docker usage
 - Combined report fields documented in README under the Parallel Pipeline section
 
 ### Fixed

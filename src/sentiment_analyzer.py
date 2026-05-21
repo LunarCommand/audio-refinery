@@ -1,6 +1,6 @@
 """Text sentiment analysis for the audio-refinery pipeline.
 
-Runs a HuggingFace text-classification pipeline (default:
+Runs a Hugging Face text-classification pipeline (default:
 cardiffnlp/twitter-roberta-base-sentiment-latest) on each segment in a
 TranscriptionResult JSON to produce per-segment sentiment scores.
 
@@ -29,7 +29,7 @@ class SentimentError(Exception):
 
 
 def _parse_device(device: str) -> int | str:
-    """Convert device string to the form expected by HuggingFace pipeline.
+    """Convert device string to the form expected by Hugging Face pipeline.
 
     'cuda:N' → N (int), 'cuda' → 0, 'cpu' → 'cpu'.
     """
@@ -43,7 +43,7 @@ def _parse_device(device: str) -> int | str:
 
 
 def load_sentiment_pipeline(model: str, device: str):
-    """Load a HuggingFace text-classification pipeline.
+    """Load a Hugging Face text-classification pipeline.
 
     Raises:
         SentimentError: If transformers is not installed.
@@ -73,8 +73,8 @@ def analyze_sentiment(
         transcription_file: Path to a TranscriptionResult JSON produced by
             ``audio-refinery transcribe``. No audio file is required.
         device: Compute device ('cpu', 'cuda', or 'cuda:N'). Defaults to 'cpu'.
-        model: HuggingFace text-classification model name.
-        _sentiment_pipeline: Pre-loaded HuggingFace pipeline. When provided,
+        model: Hugging Face text-classification model name.
+        _sentiment_pipeline: Pre-loaded Hugging Face pipeline. When provided,
             ``load_sentiment_pipeline`` is not called — used by the batch pipeline
             runner to reuse a single loaded model across all files.
 

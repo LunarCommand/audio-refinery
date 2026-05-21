@@ -382,7 +382,7 @@ def run_diarization_stage(
         demucs_output_dir: Root directory containing Demucs vocals stems.
         diarization_dir: Directory to write diarization_<content_id>.json files.
         device: Compute device.
-        hf_token: HuggingFace token (overrides HF_TOKEN env var).
+        hf_token: Hugging Face token (overrides HF_TOKEN env var).
         resume: If True, skip files whose diarization JSON already exists and are non-empty.
         on_file: Called with (content_id, index, total) before processing each file.
 
@@ -615,7 +615,7 @@ def run_pipeline(
         compute_type: WhisperX CTranslate2 compute type.
         batch_size: WhisperX segment batch size.
         language: Language code (e.g. 'en') or 'auto'.
-        hf_token: HuggingFace token for Pyannote model download.
+        hf_token: Hugging Face token for Pyannote model download.
         resume: Skip files with existing outputs.
         enable_sentiment: Enable step 4 — Text Sentiment Analysis. Runs after
             transcription as a separate post-loop pass; no audio file required.

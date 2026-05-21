@@ -106,9 +106,9 @@ the full endpoint reference, output schemas, and environment-variable table.
 
 ### Container prerequisites
 
-#### HuggingFace token
+#### Hugging Face token
 
-Pyannote speaker diarization uses gated models that require HuggingFace
+Pyannote speaker diarization uses gated models that require Hugging Face
 authentication:
 
 1. Create a free account at [huggingface.co](https://huggingface.co)

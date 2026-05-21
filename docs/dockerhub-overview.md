@@ -23,7 +23,7 @@ Wait for `GET /health` to return `200` (model warmup, ~10–30 s), then
 
 - NVIDIA GPU — **24 GB VRAM recommended** (holds all models resident)
 - NVIDIA driver ≥ 525.85.12 and the NVIDIA Container Toolkit on the host
-- A HuggingFace token for the gated Pyannote models (`HF_TOKEN`)
+- A Hugging Face token for the gated Pyannote models (`HF_TOKEN`)
 
 ## Tags
 
@@ -35,7 +35,7 @@ Wait for `GET /health` to return `200` (model warmup, ~10–30 s), then
 | Variable | Purpose |
 |----------|---------|
 | `REFINERY_API_KEYS` | **required** — bearer-token allowlist |
-| `HF_TOKEN` | **required** — HuggingFace token for diarization |
+| `HF_TOKEN` | **required** — Hugging Face token for diarization |
 | `REFINERY_WHISPER_MODEL` | Whisper variant (default `large-v3`) |
 | `REFINERY_SCRATCH_DIR` | per-job scratch; mount a tmpfs for throughput |
 
@@ -44,5 +44,5 @@ Full environment reference, CLI usage, and architecture:
 
 ## License
 
-MIT. Pyannote model weights are gated under separate HuggingFace terms — verify
+MIT. Pyannote model weights are gated under separate Hugging Face terms — verify
 your account's accepted terms cover your use case.
