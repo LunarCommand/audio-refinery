@@ -15,7 +15,7 @@ import shutil
 import tempfile
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -52,6 +52,12 @@ def _audio_refinery_version() -> str:
         return "unknown"
 
 
+def _utcnow() -> datetime:
+    """UTC-aware ``now()``, matching the pipeline stage models' timestamps so
+    service-mode timestamps serialize consistently (with a ``Z``/offset)."""
+    return datetime.now(UTC)
+
+
 # ---------------------------------------------------------------------------
 # Schema factories
 # ---------------------------------------------------------------------------
@@ -74,7 +80,7 @@ def build_combined(
         transcription: The transcription stage output.
         sentiment: The sentiment stage output, when enabled.
         processed_at: Override for the assembly timestamp. Useful in tests;
-            defaults to ``datetime.now()`` when omitted.
+            defaults to ``_utcnow()`` when omitted.
 
     Returns:
         A populated ``CombinedTranscript`` ready to JSON-serialize and upload.
@@ -88,7 +94,7 @@ def build_combined(
 
     return CombinedTranscript(
         audio_refinery_version=_audio_refinery_version(),
-        processed_at=processed_at if processed_at is not None else datetime.now(),
+        processed_at=processed_at if processed_at is not None else _utcnow(),
         audio=diarization.input_info,
         diarization=diarization,
         transcription=transcription,
@@ -135,8 +141,6 @@ def build_summary(
 # In-memory state — Job and Batch records, registries, queue
 # ---------------------------------------------------------------------------
 
-JobStatus = "queued | processing | completed | failed"  # documentation alias only
-
 
 def make_job_id() -> str:
     """Return a fresh ``rfj_<16-hex>`` identifier."""
@@ -157,7 +161,7 @@ class Job:
     input_uri: str
     output_uri: str
     status: str = "queued"  # queued | processing | completed | failed
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=_utcnow)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     failed_at: datetime | None = None
@@ -175,7 +179,7 @@ class Batch:
     batch_id: str
     summary_uri: str
     job_ids: list[str]
-    submitted_at: datetime = field(default_factory=datetime.now)
+    submitted_at: datetime = field(default_factory=_utcnow)
     completed_at: datetime | None = None
     pending_count: int = 0  # initialized to len(job_ids) at construction
 
@@ -385,7 +389,7 @@ def process_job(
     ``notify_job_failed``) are looked up at module scope so tests can patch
     them via the usual ``patch("src.service.jobs.<name>")`` pattern.
     """
-    started_at = datetime.now()
+    started_at = _utcnow()
     registries.jobs.update(job.job_id, status="processing", started_at=started_at)
     log = structlog.get_logger(__name__).bind(job_id=job.job_id, batch_id=job.batch_id)
     log.info("job.started", input_uri=job.input_uri)
@@ -480,7 +484,7 @@ def process_job(
                 log.warning("intermediate_persist.failed", error=repr(exc))
 
         # ── Mark complete ────────────────────────────────────────────────
-        completed_at = datetime.now()
+        completed_at = _utcnow()
         duration = (completed_at - started_at).total_seconds()
         registries.jobs.update(
             job.job_id,
@@ -502,7 +506,7 @@ def _record_failure(
     log: object | None = None,
 ) -> None:
     """Mark a job failed in the registry and fire the failure-only Slack hook."""
-    failed_at = datetime.now()
+    failed_at = _utcnow()
     registries.jobs.update(
         job.job_id,
         status="failed",
@@ -561,7 +565,7 @@ def finalize_batch(
     batch = registries.batches.get(batch_id)
     if batch is None:
         return
-    finished_at = completed_at if completed_at is not None else datetime.now()
+    finished_at = completed_at if completed_at is not None else _utcnow()
     registries.batches.mark_completed(batch_id, finished_at)
 
     entries = []
@@ -643,7 +647,7 @@ class Worker:
                 self._registries.jobs.update(
                     job_id,
                     status="failed",
-                    failed_at=datetime.now(),
+                    failed_at=_utcnow(),
                     stage="transcribe",
                     error=f"worker uncaught: {exc!r}",
                     retryable=False,
@@ -720,7 +724,7 @@ class RetentionSweeper:
         Returns ``(evicted_jobs, evicted_batches)``. Exposed for tests and
         operators (e.g., an admin endpoint can call this directly).
         """
-        cutoff = datetime.now() - timedelta(seconds=self._config.job_retention_seconds)
+        cutoff = _utcnow() - timedelta(seconds=self._config.job_retention_seconds)
         evicted_jobs = 0
         for job in self._registries.jobs.all_jobs():
             terminal_ts = job.completed_at or job.failed_at

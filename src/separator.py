@@ -31,7 +31,7 @@ def _default_output_dir() -> Path:
     """
     env = os.getenv("REFINERY_SCRATCH_DIR")
     if env:
-        return Path(env) / "demucs_output"
+        return Path(env) / "demucs"
     return Path(tempfile.gettempdir()) / "audio-refinery-demucs"
 
 

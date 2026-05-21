@@ -144,7 +144,6 @@ def test_transcribe_multi_job_returns_index_aligned_job_ids():
 
 
 def test_transcribe_registers_jobs_and_batch_and_enqueues():
-    registries = Registries()
     # Need a queue that matches the config's max_queue_size for the size check.
     from src.service.jobs import JobQueue
 

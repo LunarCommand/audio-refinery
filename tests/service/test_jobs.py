@@ -10,7 +10,7 @@ import queue
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -110,9 +110,11 @@ def test_job_registry_update_missing_raises():
 def test_job_registry_delete():
     reg = JobRegistry()
     reg.add(_make_job())
-    assert reg.delete("rfj_1") is True
+    deleted = reg.delete("rfj_1")
+    assert deleted is True
     assert reg.get("rfj_1") is None
-    assert reg.delete("rfj_1") is False  # second delete is a no-op
+    deleted_again = reg.delete("rfj_1")  # second delete is a no-op
+    assert deleted_again is False
 
 
 def test_job_registry_all_jobs_returns_snapshot():
@@ -821,7 +823,7 @@ def test_retention_sweep_evicts_terminal_jobs_older_than_window():
     registries = Registries()
     config = ServiceConfig(job_retention_seconds=3600)
 
-    now = datetime.now()
+    now = datetime.now(UTC)
     old_completed = _terminal_completed_job("rfj_old1", now - timedelta(hours=2))
     old_failed = _terminal_failed_job("rfj_old2", now - timedelta(hours=2))
     fresh = _terminal_completed_job("rfj_fresh", now - timedelta(minutes=5))
@@ -851,7 +853,7 @@ def test_retention_sweep_evicts_terminal_batches_older_than_window():
     registries = Registries()
     config = ServiceConfig(job_retention_seconds=3600)
 
-    now = datetime.now()
+    now = datetime.now(UTC)
     old_batch = Batch(batch_id="btc_old", summary_uri="x", job_ids=[])
     old_batch.completed_at = now - timedelta(hours=2)
     fresh_batch = Batch(batch_id="btc_fresh", summary_uri="x", job_ids=[])
@@ -900,7 +902,7 @@ def test_retention_sweeper_runs_sweep_once_per_tick():
     config = ServiceConfig(job_retention_seconds=1)  # 1 second retention
 
     # Job is already 5 seconds old → eligible for eviction.
-    registries.jobs.add(_terminal_completed_job("rfj_old", datetime.now() - timedelta(seconds=5)))
+    registries.jobs.add(_terminal_completed_job("rfj_old", datetime.now(UTC) - timedelta(seconds=5)))
 
     sweeper = RetentionSweeper(registries, config, tick_seconds=0.05)
     sweeper.start()

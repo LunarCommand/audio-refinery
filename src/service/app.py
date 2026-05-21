@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -45,6 +46,7 @@ from src.service.jobs import (
     Registries,
     RetentionSweeper,
     Worker,
+    _audio_refinery_version,
     make_batch_id,
     make_job_id,
 )
@@ -94,13 +96,12 @@ class _StripAuthorizationFilter(logging.Filter):
     (set ``access_log=False`` in :func:`run`), but the filter is defensive —
     any code path that does log a request must not leak bearer tokens."""
 
+    _BEARER_RE = re.compile(r"Bearer\s+\S+")
+
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
         if "Bearer " in msg:
-            record.msg = msg.replace(
-                msg[msg.index("Bearer ") : msg.index("Bearer ") + 7 + 16],
-                "Bearer <redacted>",
-            )
+            record.msg = self._BEARER_RE.sub("Bearer <redacted>", msg)
             record.args = ()
         return True
 
@@ -159,7 +160,7 @@ def create_app(
             if app.state.thermal_stop is not None:
                 app.state.thermal_stop.set()
 
-    app = FastAPI(title="Audio Refinery", version="0.2.0-dev", lifespan=lifespan)
+    app = FastAPI(title="Audio Refinery", version=_audio_refinery_version(), lifespan=lifespan)
     # Initialize state at construction time so endpoints work whether or not
     # the lifespan handler has run (TestClient without `with` doesn't run it).
     app.state.config = config
