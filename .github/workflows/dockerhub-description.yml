@@ -1,0 +1,35 @@
+name: Docker Hub Description
+
+# Syncs the Docker Hub repository overview + short description from
+# docs/dockerhub-overview.md. Decoupled from releases so the page updates
+# whenever the overview changes (or on demand), not just when a version ships.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/dockerhub-overview.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync Docker Hub description
+    runs-on: ubuntu-latest
+    # Requires the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repo secrets (token
+    # needs Read & Write). If Docker Hub rejects a PAT for the description API,
+    # supply an account password secret instead.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Sync Docker Hub description
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa  # v5.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: lunarcommand/audio-refinery
+          short-description: "GPU audio pipeline: separation, diarization, WhisperX transcription, sentiment — HTTP service"
+          readme-filepath: ./docs/dockerhub-overview.md

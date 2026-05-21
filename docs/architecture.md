@@ -217,15 +217,16 @@ from the first unprocessed file. `--no-resume` forces full reprocessing.
 The pipeline core (`run_pipeline()` and the stage modules) is driven by two thin
 callers that share it unchanged:
 
-```
-        CLI (audio-refinery)              Service (HTTP API)
-   one-shot / batch over a directory   async jobs, URI-in / URI-out
-                    \                        /
-                     v                      v
-            ┌───────────────────────────────────────┐
-            │   core pipeline (separate → diarize     │
-            │   → transcribe → optional sentiment)    │
-            └───────────────────────────────────────┘
+```mermaid
+flowchart TD
+    CLI["CLI — audio-refinery<br/>one-shot / batch over a directory"]
+    SVC["Service — HTTP API<br/>async jobs, URI-in / URI-out"]
+    CLI --> CORE
+    SVC --> CORE
+    subgraph CORE [core pipeline]
+        direction LR
+        SEP[separate] --> DIA[diarize] --> TRX[transcribe] --> SEN["sentiment (optional)"]
+    end
 ```
 
 - **CLI mode** loads models per invocation and processes a local directory. See
