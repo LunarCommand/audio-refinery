@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/audio-refinery-banner.jpg" alt="Audio Refinery — whimsical audio processing for AI" width="820">
+</p>
+
 # Audio Refinery
 
 GPU-accelerated audio processing pipeline: vocal separation (Demucs), speaker diarization (Pyannote), transcription (WhisperX), and text sentiment analysis. Its primary use case is building AI-ready audio databases — transforming raw recordings into structured, speaker-attributed JSON with word-level timestamps that feed directly into RAG pipelines, vector stores, and fine-tuning datasets. The pipeline uses a Ghost Track strategy: AI models run against a clean, music-free vocal stem to maximize accuracy, then the resulting metadata is applied back to the original audio, preserving its acoustic character. Designed to run on 24 GB consumer GPUs with all models resident in VRAM simultaneously, it processes large corpora in batch with no model reload overhead between files.
@@ -48,7 +52,7 @@ source .venv/bin/activate
 # Install all deps (uv sync, whisperx, CUDA torch wheels, pre-commit hooks)
 make dev-setup
 
-# Copy the env template and add your HuggingFace token
+# Copy the env template and add your Hugging Face token
 cp .env.example .env
 # Edit .env and set HF_TOKEN=hf_your_token_here
 
@@ -65,11 +69,11 @@ audio-refinery --help
 
 ## Prerequisites
 
-### HuggingFace access token (required for diarization)
+### Hugging Face access token (required for diarization)
 
-Pyannote speaker diarization models are gated on HuggingFace. This applies to **both** CLI and service mode. Complete these steps once:
+Pyannote speaker diarization models are gated on Hugging Face. This applies to **both** CLI and service mode. Complete these steps once:
 
-1. Create a HuggingFace account at [huggingface.co](https://huggingface.co) if you don't have one.
+1. Create a Hugging Face account at [huggingface.co](https://huggingface.co) if you don't have one.
 2. Accept the license for each gated model (must be logged in):
    - [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
    - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
@@ -109,16 +113,16 @@ selection rationale, and data model.
 
 ## Documentation
 
-| Document                               | Description                                                        |
-|----------------------------------------|--------------------------------------------------------------------|
-| [Index](docs/index.md)                 | Navigation hub for all documentation                               |
-| [CLI Reference](docs/cli.md)           | Every command, flag, and example for workstation use               |
-| [Service Guide](docs/service.md)       | HTTP API, container deployment, env vars, ops, troubleshooting     |
-| [Architecture](docs/architecture.md)   | Ghost Track pipeline design, model selection rationale, data model |
-| [Use Cases](docs/use-cases.md)         | Who uses this and for what                                         |
-| [Performance](docs/performance.md)     | Throughput benchmarks, scaling options, optimization guide         |
-| [Deployment](docs/deployment.md)       | Production patterns, async workers, Docker, monitoring             |
-| [Development](docs/development.md)      | Dev setup, testing, contributing, release process                  |
+| Document                             | Description                                                        |
+|--------------------------------------|--------------------------------------------------------------------|
+| [Index](docs/index.md)               | Navigation hub for all documentation                               |
+| [CLI Reference](docs/cli.md)         | Every command, flag, and example for workstation use               |
+| [Service Guide](docs/service.md)     | HTTP API, container deployment, env vars, ops, troubleshooting     |
+| [Architecture](docs/architecture.md) | Ghost Track pipeline design, model selection rationale, data model |
+| [Use Cases](docs/use-cases.md)       | Who uses this and for what                                         |
+| [Performance](docs/performance.md)   | Throughput benchmarks, scaling options, optimization guide         |
+| [Deployment](docs/deployment.md)     | Production patterns, async workers, Docker, monitoring             |
+| [Development](docs/development.md)   | Dev setup, testing, contributing, release process                  |
 
 ---
 
@@ -150,4 +154,4 @@ See [docs/development.md](docs/development.md) for the full developer guide, inc
 
 **audio-refinery** is released under the [MIT License](LICENSE).
 
-**Dependency note:** The Pyannote model weights (`pyannote/speaker-diarization-3.1` and `pyannote/segmentation-3.0`) are gated on HuggingFace under separate terms. If you run this tool in a commercial data product, verify that your HuggingFace account's accepted terms cover your use case. The MIT license on this software does not extend to the model weights — those are governed by their respective HuggingFace model cards.
+**Dependency note:** The Pyannote model weights (`pyannote/speaker-diarization-3.1` and `pyannote/segmentation-3.0`) are gated on Hugging Face under separate terms. If you run this tool in a commercial data product, verify that your Hugging Face account's accepted terms cover your use case. The MIT license on this software does not extend to the model weights — those are governed by their respective Hugging Face model cards.

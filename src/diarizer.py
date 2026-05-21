@@ -49,7 +49,7 @@ class DiarizationError(Exception):
 
 
 def _resolve_hf_token(hf_token: str | None) -> str:
-    """Return the HuggingFace token, loading from the environment if not provided.
+    """Return the Hugging Face token, loading from the environment if not provided.
 
     Raises DiarizationError if no token is found.
     """
@@ -60,7 +60,7 @@ def _resolve_hf_token(hf_token: str | None) -> str:
     token = os.environ.get("HF_TOKEN")
     if not token:
         raise DiarizationError(
-            "HuggingFace token not found. Set HF_TOKEN in your environment or .env file.\n"
+            "Hugging Face token not found. Set HF_TOKEN in your environment or .env file.\n"
             "Setup steps:\n"
             "  1. Accept the model license at https://huggingface.co/pyannote/speaker-diarization-3.1\n"
             "  2. Accept the model license at https://huggingface.co/pyannote/segmentation-3.0\n"
@@ -74,9 +74,9 @@ def load_pipeline(model: str, device: str, hf_token: str):
     """Load and return a pyannote Pipeline, moved to the specified device.
 
     Args:
-        model: HuggingFace model ID, e.g. 'pyannote/speaker-diarization-3.1'.
+        model: Hugging Face model ID, e.g. 'pyannote/speaker-diarization-3.1'.
         device: 'cuda' or 'cpu'.
-        hf_token: HuggingFace access token.
+        hf_token: Hugging Face access token.
 
     Returns:
         A loaded pyannote Pipeline ready for inference.
@@ -124,7 +124,7 @@ def diarize(
         device: Compute device ('cuda' or 'cpu').
         min_speakers: Optional lower bound on speaker count.
         max_speakers: Optional upper bound on speaker count.
-        hf_token: HuggingFace token. If None, reads from HF_TOKEN env var.
+        hf_token: Hugging Face token. If None, reads from HF_TOKEN env var.
         model: Pyannote model ID.
         _pipeline: Pre-loaded Pyannote pipeline instance. Skips model loading when
             provided; intended for testing and pipeline reuse.

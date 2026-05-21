@@ -76,7 +76,7 @@ class TestDiarize:
         monkeypatch.delenv("HF_TOKEN", raising=False)
         # Prevent dotenv from loading a real .env during test
         with patch("src.diarizer.load_dotenv"):
-            with pytest.raises(DiarizationError, match="HuggingFace token not found"):
+            with pytest.raises(DiarizationError, match="Hugging Face token not found"):
                 diarize(fake_wav)  # no hf_token, no env var
 
     def test_hf_token_from_env(self, fake_wav, mock_audio_info, monkeypatch):

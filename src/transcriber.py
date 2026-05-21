@@ -1,6 +1,7 @@
 """WhisperX transcription — Python API wrapper.
 
 Runs WhisperX (Whisper Large-v3 + Wav2Vec2 forced alignment) in-process.
+Default model: ``large-v3``.
 GPU memory is released naturally when the process exits; each pipeline
 step is meant to be run as its own CLI invocation.
 """
@@ -17,6 +18,8 @@ from pathlib import Path
 from src.models.audio import AudioFileInfo
 from src.models.transcription import TranscriptionResult, TranscriptSegment, WordSegment
 from src.separator import probe_audio_file
+
+logger = logging.getLogger(__name__)
 
 # Loggers that produce noisy INFO/WARNING output during model loading.
 # These are version-mismatch and deprecation notices from third-party internals
@@ -187,7 +190,13 @@ def transcribe(
             aligned = whisperx.align(
                 raw_result["segments"], align_model, metadata, audio, device, return_char_alignments=False
             )
-        except (RuntimeError, ValueError, OSError, KeyError):
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            logger.debug(
+                "Alignment failed; falling back to transcription-only segments (language=%s, device=%s): %s",
+                detected_language,
+                device,
+                exc,
+            )
             alignment_fallback = True
             aligned = raw_result
 

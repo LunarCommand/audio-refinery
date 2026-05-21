@@ -8,7 +8,7 @@ batch runs over a local directory of WAV files. For the long-lived HTTP service
 
 This page assumes you have already installed the package — see
 [Installation](../README.md#installation) in the README and the
-[HuggingFace token setup](../README.md#prerequisites), which diarization
+[Hugging Face token setup](../README.md#prerequisites), which diarization
 requires in either mode.
 
 ## Contents
@@ -61,7 +61,7 @@ RAM-tight machines a fast SSD is a fine target.
 ## Demucs model weights
 
 The first run auto-downloads the `htdemucs` weights (~80 MB) to
-`~/.cache/torch/hub/checkpoints/`. No HuggingFace token or manual download is
+`~/.cache/torch/hub/checkpoints/`. No Hugging Face token or manual download is
 required for separation.
 
 ---
@@ -151,7 +151,7 @@ Options:
                           (e.g. 'cuda:0').  [default: cuda]
   --min-speakers INTEGER  Minimum number of speakers (optional hint for Pyannote).
   --max-speakers INTEGER  Maximum number of speakers (optional hint for Pyannote).
-  --hf-token TEXT         HuggingFace token (overrides HF_TOKEN env var).
+  --hf-token TEXT         Hugging Face token (overrides HF_TOKEN env var).
   -o, --output-file FILE  Write DiarizationResult JSON to this file.
   --help                  Show this message and exit.
 ```
@@ -168,8 +168,8 @@ audio-refinery diarize /path/to/vocals.wav -d cuda:0 -o /tmp/diarization.json
 
 ### Troubleshooting
 
-- **`HuggingFace token not found`** — Follow the HF setup steps in the README.
-- **`Failed to load Pyannote pipeline`** — Check that you accepted both model licenses on HuggingFace.
+- **`Hugging Face token not found`** — Follow the HF setup steps in the README.
+- **`Failed to load Pyannote pipeline`** — Check that you accepted both model licenses on Hugging Face.
 
 ---
 
@@ -278,7 +278,7 @@ Arguments:
   TRANSCRIPTION_FILE     TranscriptionResult JSON written by step 3  [required]
 
 Options:
-  --model TEXT           HuggingFace text-classification model name.
+  --model TEXT           Hugging Face text-classification model name.
                          [default: cardiffnlp/twitter-roberta-base-sentiment-latest]
   -d, --device TEXT      Compute device: 'cpu', 'cuda', or 'cuda:N'.  [default: cpu]
   -o, --output-file FILE Write SentimentResult JSON to this file.
@@ -368,7 +368,7 @@ Options:
                                      WhisperX CTranslate2 compute type  [default: float16]
   --batch-size INTEGER               WhisperX batch size  [default: 16]
   --language TEXT                    Language code (e.g. 'en') or 'auto'  [default: en]
-  --hf-token TEXT                    HuggingFace token for Pyannote (overrides HF_TOKEN env var)
+  --hf-token TEXT                    Hugging Face token for Pyannote (overrides HF_TOKEN env var)
   --no-resume                        Re-process all files, ignoring existing outputs
   --keep-scratch                     Keep Demucs stems on the scratch disk after the run
   --whisper-model TEXT               WhisperX model name  [default: large-v3]
@@ -633,7 +633,7 @@ Options:
                                      WhisperX CTranslate2 compute type  [default: float16]
   --batch-size INTEGER               WhisperX batch size  [default: 16]
   --language TEXT                    Language code (e.g. 'en') or 'auto'  [default: en]
-  --hf-token TEXT                    HuggingFace token for Pyannote (overrides HF_TOKEN env var)
+  --hf-token TEXT                    Hugging Face token for Pyannote (overrides HF_TOKEN env var)
   --no-resume                        Re-process all files, ignoring existing outputs
   --keep-scratch                     Keep Demucs stems on the scratch disk after the run
   --whisper-model TEXT               WhisperX model name  [default: large-v3]

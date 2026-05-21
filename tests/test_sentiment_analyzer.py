@@ -76,7 +76,7 @@ def _make_transcription(
 
 
 def _mock_pipeline_output():
-    """Return a callable that mimics a HuggingFace text-classification pipeline."""
+    """Return a callable that mimics a Hugging Face text-classification pipeline."""
 
     def _pipeline(text, top_k=None):
         return [

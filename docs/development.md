@@ -96,7 +96,7 @@ audio-refinery/
 │   ├── separator.py           # Demucs vocal separation wrapper
 │   ├── diarizer.py            # Pyannote speaker diarization wrapper
 │   ├── transcriber.py         # WhisperX transcription wrapper
-│   ├── sentiment_analyzer.py  # HuggingFace sentiment analysis
+│   ├── sentiment_analyzer.py  # Hugging Face sentiment analysis
 │   ├── pipeline.py            # Batch pipeline orchestration
 │   ├── gpu_utils.py           # GPU queries via nvidia-smi
 │   ├── notifier.py            # Slack webhook notifications
@@ -270,7 +270,7 @@ Hooks run:
 - **ffmpeg-python**: FFmpeg subprocess wrapper
 - **click** (>=8.1): CLI framework
 - **rich** (>=13.0): Terminal formatting, tables, and progress spinners
-- **transformers** (>=4.30.0): HuggingFace models for sentiment analysis
+- **transformers** (>=4.30.0): Hugging Face models for sentiment analysis
 
 ### Conflicting Dependencies (Install Separately)
 
@@ -480,7 +480,7 @@ uv run mypy src/ --ignore-missing-imports --show-error-codes
 - [Demucs](https://github.com/facebookresearch/demucs) — Vocal separation model
 - [Pyannote.audio](https://github.com/pyannote/pyannote-audio) — Speaker diarization
 - [WhisperX](https://github.com/m-bain/whisperX) — Transcription with alignment
-- [HuggingFace Transformers](https://huggingface.co/docs/transformers) — Sentiment model
+- [Hugging Face Transformers](https://huggingface.co/docs/transformers) — Sentiment model
 - [Click](https://click.palletsprojects.com/) — CLI framework
 - [Rich](https://rich.readthedocs.io/) — Terminal UI library
 - [Pydantic](https://docs.pydantic.dev/) — Data validation

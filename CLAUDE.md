@@ -26,7 +26,7 @@ audio-refinery/
 │   ├── separator.py           # Demucs vocal separation wrapper
 │   ├── diarizer.py            # Pyannote speaker diarization wrapper
 │   ├── transcriber.py         # WhisperX transcription wrapper
-│   ├── sentiment_analyzer.py  # HuggingFace sentiment analysis
+│   ├── sentiment_analyzer.py  # Hugging Face sentiment analysis
 │   ├── pipeline.py            # Batch pipeline orchestration (947 lines)
 │   ├── gpu_utils.py           # GPU queries via nvidia-smi
 │   ├── notifier.py            # Slack webhook notifications

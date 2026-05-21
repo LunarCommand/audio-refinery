@@ -54,11 +54,11 @@ class TestDiarizeCommand:
 
     def test_diarization_error_exits_nonzero(self, fake_wav):
         runner = CliRunner()
-        with patch("src.cli.diarize", side_effect=DiarizationError("HuggingFace token not found")):
+        with patch("src.cli.diarize", side_effect=DiarizationError("Hugging Face token not found")):
             result = runner.invoke(cli, ["diarize", str(fake_wav)])
 
         assert result.exit_code == 1
-        assert "HuggingFace token not found" in result.output
+        assert "Hugging Face token not found" in result.output
 
     def test_file_not_found_exits_nonzero(self, tmp_path):
         runner = CliRunner()
