@@ -5,17 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.1] - 2026-05-20
+## [0.2.1] - 2026-05-21
 
 ### Fixed
 
 - Service mode now pins `CUDA_DEVICE_ORDER=PCI_BUS_ID` at startup (matching the CLI), so `REFINERY_DEVICE=cuda:N` selects the GPU at `nvidia-smi` index N rather than CUDA's default FASTEST_FIRST ordering. Previously a multi-GPU host could load models onto the wrong card.
+- WhisperX forced-alignment failures are now logged at debug level (with the detected language and device) before falling back to transcription-only segments, instead of being swallowed silently.
 
 ### Documentation
 
 - Corrected the service-mode tmpfs example to `--mount type=tmpfs,dst=/scratch,tmpfs-mode=1777`. A bare `--tmpfs /scratch` mounts root-owned, so the non-root `refinery` user could not write scratch and every job failed with `PermissionError`. Applied the same fix in `docs/deployment.md`.
 - Added service-mode GPU-selection guidance, an end-to-end local-directory batch runbook, and troubleshooting entries (tmpfs permissions, wrong-GPU selection, batch-size cap) to `docs/service.md`.
 - Added the project banner to the README.
+
+### Security
+
+- Upgraded vulnerable transitive and dev dependencies to patched versions: `aiohttp` 3.13.3 → 3.13.5, `requests` 2.32.5 → 2.34.2, `Pygments` 2.19.2 → 2.20.0, and `pytest` 9.0.2 → 9.0.3. Closes 13 Dependabot alerts (10 `aiohttp` plus `requests`, `Pygments`, `pytest`). The `torch` and `transformers` alerts remain deferred to v0.3.0, when WhisperX removal lifts the `torch==2.1.2` / `transformers<4.40` pins.
 
 ## [0.2.0] - 2026-05-20
 
