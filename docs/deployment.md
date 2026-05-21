@@ -182,7 +182,7 @@ Hub as `lunarcommand/audio-refinery:<version>`.
 docker run --gpus all -p 8000:8000 \
   -e REFINERY_API_KEYS=your-secret-key \
   -e HF_TOKEN="${HF_TOKEN}" \
-  --tmpfs /scratch -e REFINERY_SCRATCH_DIR=/scratch \
+  --mount type=tmpfs,dst=/scratch,tmpfs-mode=1777 -e REFINERY_SCRATCH_DIR=/scratch \
   lunarcommand/audio-refinery:latest
 ```
 
@@ -229,7 +229,7 @@ the command — useful for containerized batch jobs over a bind-mounted director
 ```bash
 docker run --rm --gpus '"device=0"' \
   -v /data/audio:/data \
-  --tmpfs /scratch -e REFINERY_SCRATCH_DIR=/scratch \
+  --mount type=tmpfs,dst=/scratch,tmpfs-mode=1777 -e REFINERY_SCRATCH_DIR=/scratch \
   -e HF_TOKEN="${HF_TOKEN}" \
   -e SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}" \
   lunarcommand/audio-refinery:latest \

@@ -299,6 +299,20 @@ more containers (one per GPU) behind your own queue/dispatcher. There is no
 in-container parallelism to tune — the `pipeline-parallel` multi-GPU mode is a
 CLI-only feature.
 
+### GPU selection
+
+On a multi-GPU host, choose the device with `REFINERY_DEVICE` (e.g.
+`-e REFINERY_DEVICE=cuda:1`). The service pins `CUDA_DEVICE_ORDER=PCI_BUS_ID` at
+startup (matching the CLI), so `cuda:N` maps to the same physical GPU as
+`nvidia-smi` index N. `REFINERY_DEVICE` defaults to `cuda` (= `cuda:0`).
+
+Alternatively, expose only the target GPU to the container and let it be the
+sole device — this sidesteps device ordering entirely:
+
+```bash
+docker run --gpus '"device=1"' ...   # instead of --gpus all; service uses the one visible GPU
+```
+
 ### Scratch and the tmpfs hint
 
 Per-job scratch (input download + Demucs stems) defaults to `/tmp` inside the
@@ -307,11 +321,16 @@ it for a throughput boost:
 
 ```bash
 docker run --gpus all -p 8000:8000 \
-  --tmpfs /scratch \
+  --mount type=tmpfs,dst=/scratch,tmpfs-mode=1777 \
   -e REFINERY_SCRATCH_DIR=/scratch \
   -e REFINERY_API_KEYS=your-secret-key -e HF_TOKEN=hf_... \
   lunarcommand/audio-refinery:latest
 ```
+
+`tmpfs-mode=1777` is required: a bare `--tmpfs /scratch` mounts the tmpfs
+**root-owned**, and the non-root `refinery` user then can't create its per-job
+working dir there — every job fails instantly with `PermissionError`. The
+`1777` (sticky, world-writable, like `/tmp`) lets uid 1000 write.
 
 If `REFINERY_SCRATCH_DIR` points at a non-tmpfs path, the service logs a
 `scratch.not_tmpfs` warning at startup — informational, not an error. Peak
@@ -373,6 +392,31 @@ The combined transcript lands in `./outputs/sample.json` and the batch summary
 in `./summaries/batch.json` on the host. Run the container's uid 1000 against
 host-owned dirs (or `chmod` the output dirs) so the `refinery` user can write.
 
+### Processing a whole directory in one batch
+
+For many files, generate the `jobs` array from the directory instead of
+hand-writing it. If you have more than `REFINERY_MAX_BATCH_SIZE` files (default
+25), raise the cap on the container (`-e REFINERY_MAX_BATCH_SIZE=50`):
+
+```bash
+cd /path/to/wavs   # the host dir bind-mounted at /inputs
+jq -n '{
+  summary_uri: "file:///summaries/batch.json",
+  jobs: [ $ARGS.positional[] | {
+    input_uri:  ("file:///inputs/"  + .),
+    output_uri: ("file:///outputs/" + (sub("\\.wav$";"") + ".json"))
+  } ]
+}' --args *.wav > /tmp/batch.json
+
+curl -s -X POST http://localhost:8000/transcribe \
+  -H "Authorization: Bearer test-key" -H "Content-Type: application/json" \
+  --data @/tmp/batch.json | jq .
+```
+
+`jq --args *.wav` is filename-safe (no shell-quoting pitfalls with hyphens or
+underscores). Watch the worker logs for `batch.summary_uploaded`, then verify
+the output count: `ls ./outputs/*.json | wc -l`.
+
 You can also run the service without Docker for fast iteration:
 
 ```bash
@@ -391,3 +435,6 @@ REFINERY_API_KEYS=test-key audio-refinery serve
 - **`401` on every request** — Missing `Authorization: Bearer <key>` header, or the key isn't in `REFINERY_API_KEYS`.
 - **Diarization fails for every job** — `HF_TOKEN` missing/invalid, or the gated model licenses weren't accepted. See [the README prerequisites](../README.md#prerequisites).
 - **`scratch.not_tmpfs` warning** — Informational. Mount a tmpfs at the scratch path for better batch throughput, or ignore it on RAM-tight hosts.
+- **Every job fails instantly with `PermissionError`** — the scratch dir isn't writable by the non-root `refinery` user. If you mounted a tmpfs, use `--mount type=tmpfs,dst=/scratch,tmpfs-mode=1777` — a bare `--tmpfs /scratch` is root-owned. See [the tmpfs note above](#scratch-and-the-tmpfs-hint).
+- **Jobs run on the wrong GPU** — `REFINERY_DEVICE=cuda:N` maps to the `nvidia-smi` index because the service pins `CUDA_DEVICE_ORDER=PCI_BUS_ID` (since v0.2.1; older images used CUDA's FASTEST_FIRST ordering). If it still lands wrong, expose only the target GPU with `--gpus '"device=N"'`.
+- **`400 batch_too_large`** — the batch exceeds `REFINERY_MAX_BATCH_SIZE` (default 25). Raise it (`-e REFINERY_MAX_BATCH_SIZE=…`) or split the batch.
