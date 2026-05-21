@@ -6,7 +6,7 @@ pipeline as the CLI. See `_reqs/service-mode.md` and `_plans/service-mode-plan.m
 
 import os
 
-# Pin CUDA's device enumeration to PCI bus order, matching the CLI
+# Default CUDA's device enumeration to PCI bus order, matching the CLI
 # (`src/cli.py`). Without this, CUDA's default FASTEST_FIRST ordering can make
 # `REFINERY_DEVICE=cuda:N` select a different physical GPU than `nvidia-smi`
 # index N on multi-GPU hosts. Set here in the service package __init__ so it

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Service mode now pins `CUDA_DEVICE_ORDER=PCI_BUS_ID` at startup (matching the CLI), so `REFINERY_DEVICE=cuda:N` selects the GPU at `nvidia-smi` index N rather than CUDA's default FASTEST_FIRST ordering. Previously a multi-GPU host could load models onto the wrong card.
+- Service mode now defaults `CUDA_DEVICE_ORDER` to `PCI_BUS_ID` at startup (matching the CLI, respecting an explicit override), so `REFINERY_DEVICE=cuda:N` selects the GPU at `nvidia-smi` index N rather than CUDA's default FASTEST_FIRST ordering. Previously a multi-GPU host could load models onto the wrong card.
 - WhisperX forced-alignment failures are now logged at debug level (with the detected language and device) before falling back to transcription-only segments, instead of being swallowed silently.
 
 ### Documentation

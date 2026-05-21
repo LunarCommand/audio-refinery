@@ -302,9 +302,10 @@ CLI-only feature.
 ### GPU selection
 
 On a multi-GPU host, choose the device with `REFINERY_DEVICE` (e.g.
-`-e REFINERY_DEVICE=cuda:1`). The service pins `CUDA_DEVICE_ORDER=PCI_BUS_ID` at
-startup (matching the CLI), so `cuda:N` maps to the same physical GPU as
-`nvidia-smi` index N. `REFINERY_DEVICE` defaults to `cuda` (= `cuda:0`).
+`-e REFINERY_DEVICE=cuda:1`). The service defaults `CUDA_DEVICE_ORDER` to
+`PCI_BUS_ID` at startup (matching the CLI; an explicit value is respected), so
+`cuda:N` maps to the same physical GPU as `nvidia-smi` index N. `REFINERY_DEVICE`
+defaults to `cuda` (= `cuda:0`).
 
 Alternatively, expose only the target GPU to the container and let it be the
 sole device — this sidesteps device ordering entirely:
@@ -436,5 +437,5 @@ REFINERY_API_KEYS=test-key audio-refinery serve
 - **Diarization fails for every job** — `HF_TOKEN` missing/invalid, or the gated model licenses weren't accepted. See [the README prerequisites](../README.md#prerequisites).
 - **`scratch.not_tmpfs` warning** — Informational. Mount a tmpfs at the scratch path for better batch throughput, or ignore it on RAM-tight hosts.
 - **Every job fails instantly with `PermissionError`** — the scratch dir isn't writable by the non-root `refinery` user. If you mounted a tmpfs, use `--mount type=tmpfs,dst=/scratch,tmpfs-mode=1777` — a bare `--tmpfs /scratch` is root-owned. See [the tmpfs note above](#scratch-and-the-tmpfs-hint).
-- **Jobs run on the wrong GPU** — `REFINERY_DEVICE=cuda:N` maps to the `nvidia-smi` index because the service pins `CUDA_DEVICE_ORDER=PCI_BUS_ID` (since v0.2.1; older images used CUDA's FASTEST_FIRST ordering). If it still lands wrong, expose only the target GPU with `--gpus '"device=N"'`.
+- **Jobs run on the wrong GPU** — `REFINERY_DEVICE=cuda:N` maps to the `nvidia-smi` index because the service defaults `CUDA_DEVICE_ORDER` to `PCI_BUS_ID` (since v0.2.1, unless you set it explicitly; older images used CUDA's FASTEST_FIRST ordering). If it still lands wrong, expose only the target GPU with `--gpus '"device=N"'`.
 - **`400 batch_too_large`** — the batch exceeds `REFINERY_MAX_BATCH_SIZE` (default 25). Raise it (`-e REFINERY_MAX_BATCH_SIZE=…`) or split the batch.
