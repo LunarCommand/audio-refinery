@@ -70,7 +70,12 @@ generate-schemas: ## Regenerate docs/schemas/*.json from the Pydantic models
 
 check-schemas: ## Fail if docs/schemas/*.json is out of sync with the Pydantic models
 	@uv run python scripts/generate_schemas.py >/dev/null
-	@git diff --exit-code docs/schemas/ || (echo ""; echo "docs/schemas/ is out of sync — run 'make generate-schemas' and commit."; exit 1)
+	@if [ -n "$$(git status --porcelain docs/schemas/)" ]; then \
+		echo ""; \
+		echo "docs/schemas/ is out of sync — run 'make generate-schemas' and commit."; \
+		git status --short docs/schemas/; \
+		exit 1; \
+	fi
 
 all-checks: lint type-check test check-schemas ## Run all checks (lint, type-check, test, schema drift)
 	@echo ""
