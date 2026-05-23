@@ -156,6 +156,42 @@ class TestBuildSegments:
         assert segs[0].words == []
         assert segs[0].speaker is None
 
+    def test_word_speaker_falls_back_to_segment(self):
+        """When the WhisperX↔pyannote word-level join misses, the word inherits
+        the enclosing segment's speaker rather than being emitted as null."""
+        raw = [
+            {
+                "text": "looks really well",
+                "start": 135.0,
+                "end": 136.0,
+                "speaker": "SPEAKER_00",
+                "words": [
+                    {"word": "looks", "start": 135.28, "end": 135.54, "speaker": "SPEAKER_00"},
+                    {"word": "really", "start": 135.56, "end": 135.74, "speaker": "SPEAKER_00"},
+                    # Trailing-edge word whose diarization join missed — no
+                    # "speaker" key in the dict.
+                    {"word": "well", "start": 135.90, "end": 135.98},
+                ],
+            }
+        ]
+        segs = _build_segments(raw)
+        assert [w.speaker for w in segs[0].words] == ["SPEAKER_00", "SPEAKER_00", "SPEAKER_00"]
+
+    def test_word_speaker_stays_none_when_segment_also_none(self):
+        """When diarization wasn't applied, both segment and word speakers
+        remain None — the fallback doesn't fabricate a label."""
+        raw = [
+            {
+                "text": "Hi",
+                "start": 0.0,
+                "end": 0.5,
+                "words": [{"word": "Hi", "start": 0.0, "end": 0.4}],
+            }
+        ]
+        segs = _build_segments(raw)
+        assert segs[0].speaker is None
+        assert segs[0].words[0].speaker is None
+
 
 # ---------------------------------------------------------------------------
 # transcribe() — error paths

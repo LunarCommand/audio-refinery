@@ -225,6 +225,56 @@ batch outcomes.
 
 `stage` is one of `download`, `transcribe`, `upload`, `thermal_shutdown`.
 
+### Validating against the schema
+
+JSON Schemas for both documents above ship with every release. They live in
+the repo under `docs/schemas/` and are attached as assets on each GitHub
+release, so consumers who don't import the Python package have an
+authoritative artifact to validate against:
+
+- `combined-transcript-v1.json`
+- `batch-summary-v1.json`
+
+Each file is generated from the same Pydantic models the service uses, in
+serialization mode (matching the bytes you'll actually receive). A CI drift
+check fails the build if a model change isn't accompanied by a schema regen,
+so the artifact stays in lockstep with the producer.
+
+**Pin to a release tag, not `main`.** Fetch the schema for the version of
+Audio Refinery you're consuming:
+
+```
+https://raw.githubusercontent.com/LunarCommand/audio-refinery/v0.2.2/docs/schemas/combined-transcript-v1.json
+```
+
+The major-version suffix in the filename only changes when the document
+shape breaks (e.g., when v0.3.0 alignment lands, a `-v2.json` will appear
+next to the v1 file). Minor and patch AR releases will not change
+`-v1.json` in a breaking way; consumers can safely pin to a tag and bump on
+their own cadence.
+
+Example with Python `jsonschema`:
+
+```python
+import json
+import urllib.request
+
+import jsonschema
+
+url = "https://raw.githubusercontent.com/LunarCommand/audio-refinery/v0.2.2/docs/schemas/combined-transcript-v1.json"
+schema = json.loads(urllib.request.urlopen(url).read())
+
+with open("transcript.json") as f:
+    jsonschema.validate(instance=json.load(f), schema=schema)
+```
+
+Note: `WordSegment.speaker`, `TranscriptSegment.speaker`, and the sentiment
+`speaker` fields are nullable strings. Word-level speaker can be `null`
+when WhisperX's word-level diarization join doesn't intersect any
+pyannote span; from v0.2.2 onward the producer falls back to the enclosing
+segment's speaker in that case, so this is now rare in practice but
+remains permitted by the schema.
+
 ---
 
 ## Environment variables

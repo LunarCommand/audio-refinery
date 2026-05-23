@@ -1,0 +1,566 @@
+{
+  "$defs": {
+    "AudioFileInfo": {
+      "description": "Metadata about an audio file, typically from soundfile.info().",
+      "properties": {
+        "channels": {
+          "title": "Channels",
+          "type": "integer"
+        },
+        "duration_seconds": {
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "format_str": {
+          "description": "Audio format, e.g. 'WAV'",
+          "title": "Format Str",
+          "type": "string"
+        },
+        "frames": {
+          "title": "Frames",
+          "type": "integer"
+        },
+        "path": {
+          "format": "path",
+          "title": "Path",
+          "type": "string"
+        },
+        "sample_rate": {
+          "title": "Sample Rate",
+          "type": "integer"
+        },
+        "subtype": {
+          "description": "Audio subtype, e.g. 'PCM_16'",
+          "title": "Subtype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sample_rate",
+        "channels",
+        "duration_seconds",
+        "frames",
+        "format_str",
+        "subtype"
+      ],
+      "title": "AudioFileInfo",
+      "type": "object"
+    },
+    "DiarizationResult": {
+      "description": "Full provenance record of a Pyannote diarization run.",
+      "properties": {
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "device": {
+          "default": "cuda",
+          "title": "Device",
+          "type": "string"
+        },
+        "input_file": {
+          "format": "path",
+          "title": "Input File",
+          "type": "string"
+        },
+        "input_info": {
+          "$ref": "#/$defs/AudioFileInfo"
+        },
+        "max_speakers": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Speakers"
+        },
+        "min_speakers": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Speakers"
+        },
+        "model_name": {
+          "default": "pyannote/speaker-diarization-3.1",
+          "title": "Model Name",
+          "type": "string"
+        },
+        "num_speakers": {
+          "description": "Number of unique speaker clusters detected",
+          "title": "Num Speakers",
+          "type": "integer"
+        },
+        "processing_time_seconds": {
+          "title": "Processing Time Seconds",
+          "type": "number"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/SpeakerSegment"
+          },
+          "title": "Segments",
+          "type": "array"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "input_file",
+        "input_info",
+        "segments",
+        "num_speakers",
+        "processing_time_seconds",
+        "started_at",
+        "completed_at"
+      ],
+      "title": "DiarizationResult",
+      "type": "object"
+    },
+    "SegmentSentiment": {
+      "description": "Sentiment analysis result for a single transcript segment.",
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "number"
+        },
+        "primary_sentiment": {
+          "title": "Primary Sentiment",
+          "type": "string"
+        },
+        "scores": {
+          "items": {
+            "$ref": "#/$defs/SentimentScore"
+          },
+          "title": "Scores",
+          "type": "array"
+        },
+        "speaker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker"
+        },
+        "start": {
+          "title": "Start",
+          "type": "number"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "scores",
+        "primary_sentiment"
+      ],
+      "title": "SegmentSentiment",
+      "type": "object"
+    },
+    "SentimentResult": {
+      "description": "Full provenance record of a sentiment analysis run.",
+      "properties": {
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "model_name": {
+          "default": "cardiffnlp/twitter-roberta-base-sentiment-latest",
+          "title": "Model Name",
+          "type": "string"
+        },
+        "processing_time_seconds": {
+          "title": "Processing Time Seconds",
+          "type": "number"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/SegmentSentiment"
+          },
+          "title": "Segments",
+          "type": "array"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "transcription_file": {
+          "format": "path",
+          "title": "Transcription File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "transcription_file",
+        "segments",
+        "device",
+        "processing_time_seconds",
+        "started_at",
+        "completed_at"
+      ],
+      "title": "SentimentResult",
+      "type": "object"
+    },
+    "SentimentScore": {
+      "description": "A single sentiment class score from the classifier.",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "label",
+        "score"
+      ],
+      "title": "SentimentScore",
+      "type": "object"
+    },
+    "SpeakerSegment": {
+      "description": "A single speaker turn detected by diarization.",
+      "properties": {
+        "duration_seconds": {
+          "readOnly": true,
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "end_seconds": {
+          "title": "End Seconds",
+          "type": "number"
+        },
+        "speaker_label": {
+          "description": "Speaker cluster label, e.g. 'SPEAKER_00'",
+          "title": "Speaker Label",
+          "type": "string"
+        },
+        "start_seconds": {
+          "title": "Start Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "speaker_label",
+        "start_seconds",
+        "end_seconds",
+        "duration_seconds"
+      ],
+      "title": "SpeakerSegment",
+      "type": "object"
+    },
+    "TranscriptSegment": {
+      "description": "A sentence or clause boundary segment with word-level breakdown.",
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "number"
+        },
+        "sentiment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SegmentSentiment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "speaker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker"
+        },
+        "start": {
+          "title": "Start",
+          "type": "number"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "words": {
+          "items": {
+            "$ref": "#/$defs/WordSegment"
+          },
+          "title": "Words",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text",
+        "start",
+        "end"
+      ],
+      "title": "TranscriptSegment",
+      "type": "object"
+    },
+    "TranscriptionResult": {
+      "description": "Full provenance record of a WhisperX transcription run.",
+      "properties": {
+        "alignment_fallback": {
+          "default": false,
+          "title": "Alignment Fallback",
+          "type": "boolean"
+        },
+        "batch_size": {
+          "title": "Batch Size",
+          "type": "integer"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "compute_type": {
+          "title": "Compute Type",
+          "type": "string"
+        },
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "diarization_applied": {
+          "default": false,
+          "title": "Diarization Applied",
+          "type": "boolean"
+        },
+        "diarization_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diarization File"
+        },
+        "input_file": {
+          "format": "path",
+          "title": "Input File",
+          "type": "string"
+        },
+        "input_info": {
+          "$ref": "#/$defs/AudioFileInfo"
+        },
+        "language": {
+          "description": "Language code, e.g. 'en'",
+          "title": "Language",
+          "type": "string"
+        },
+        "language_probability": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language Probability"
+        },
+        "model_name": {
+          "default": "large-v3",
+          "title": "Model Name",
+          "type": "string"
+        },
+        "processing_time_seconds": {
+          "title": "Processing Time Seconds",
+          "type": "number"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/TranscriptSegment"
+          },
+          "title": "Segments",
+          "type": "array"
+        },
+        "sentiment_applied": {
+          "default": false,
+          "title": "Sentiment Applied",
+          "type": "boolean"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "input_file",
+        "input_info",
+        "language",
+        "segments",
+        "device",
+        "compute_type",
+        "batch_size",
+        "processing_time_seconds",
+        "started_at",
+        "completed_at"
+      ],
+      "title": "TranscriptionResult",
+      "type": "object"
+    },
+    "WordSegment": {
+      "description": "A single word with timing and optional speaker assignment.",
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "number"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        },
+        "speaker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker"
+        },
+        "start": {
+          "title": "Start",
+          "type": "number"
+        },
+        "word": {
+          "description": "Transcribed word (may include surrounding whitespace)",
+          "title": "Word",
+          "type": "string"
+        }
+      },
+      "required": [
+        "word",
+        "start",
+        "end"
+      ],
+      "title": "WordSegment",
+      "type": "object"
+    }
+  },
+  "description": "One combined-output JSON per successful job.\n\nWraps the existing per-stage Pydantic models so the consuming analysis\npipeline reads a single document instead of stitching diarization +\ntranscription + sentiment together itself.",
+  "properties": {
+    "audio": {
+      "$ref": "#/$defs/AudioFileInfo",
+      "description": "Input audio metadata."
+    },
+    "audio_refinery_version": {
+      "description": "Version of audio-refinery that produced this document.",
+      "title": "Audio Refinery Version",
+      "type": "string"
+    },
+    "diarization": {
+      "$ref": "#/$defs/DiarizationResult",
+      "description": "Full pyannote diarization result."
+    },
+    "model_versions": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Per-stage model identifiers for quick lookup.",
+      "title": "Model Versions",
+      "type": "object"
+    },
+    "processed_at": {
+      "description": "When this combined document was assembled (UTC).",
+      "format": "date-time",
+      "title": "Processed At",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "description": "Semver of the transcript schema.",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sentiment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SentimentResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Sentiment result, present only when enabled."
+    },
+    "transcription": {
+      "$ref": "#/$defs/TranscriptionResult",
+      "description": "Full WhisperX transcription result."
+    }
+  },
+  "required": [
+    "audio_refinery_version",
+    "processed_at",
+    "audio",
+    "diarization",
+    "transcription",
+    "model_versions"
+  ],
+  "title": "CombinedTranscript",
+  "type": "object"
+}

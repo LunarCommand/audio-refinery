@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-05-22
+
+### Changed
+
+- Word-level `speaker` in combined transcripts now falls back to the enclosing segment's speaker when WhisperX's word-level diarization join doesn't intersect any pyannote span (typically a boundary-overlap gap on short, low-confidence trailing words). Previously such words were emitted with `speaker: null` despite the segment carrying a confident label. The Pydantic contract is unchanged — word-level `speaker` is still nullable in principle — but in practice the field is now populated whenever the segment-level assignment is confident.
+
+### Added
+
+- Published JSON Schemas for the combined transcript and batch summary documents under `docs/schemas/` (`combined-transcript-v1.json`, `batch-summary-v1.json`). They are generated from the Pydantic source-of-truth in serialization mode, attached as GitHub release assets, and kept in lockstep with the models by a CI drift check. Consumers without access to the Python package can now fetch the schema for a pinned AR version directly from the release tag and validate transcripts against it. See `docs/service.md` for the consumption pattern.
+- `make generate-schemas` and `make check-schemas` Makefile targets. The drift check now runs as part of `make all-checks` and as a dedicated CI job (`Schema Drift Check` in `ci.yml`).
+
+### Documentation
+
+- Refreshed the README banner image.
+
 ## [0.2.1] - 2026-05-21
 
 ### Fixed
