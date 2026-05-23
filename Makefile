@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-whisperx test test-verbose test-integration test-coverage lint lint-fix format format-check type-check clean pre-commit pre-commit-install all-checks ci dev-setup stats build-image run-service-local
+.PHONY: help install install-dev install-whisperx test test-verbose test-integration test-coverage lint lint-fix format format-check type-check clean pre-commit pre-commit-install all-checks ci dev-setup stats build-image run-service-local generate-schemas check-schemas
 
 # Read the version from pyproject.toml so build-image stays in sync with releases.
 VERSION := $(shell awk -F'"' '/^version = /{print $$2; exit}' pyproject.toml)
@@ -65,7 +65,19 @@ clean: ## Remove generated files and caches
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name '*.pyc' -delete
 
-all-checks: lint type-check test ## Run all checks (lint, type-check, test)
+generate-schemas: ## Regenerate docs/schemas/*.json from the Pydantic models
+	uv run python scripts/generate_schemas.py
+
+check-schemas: ## Fail if docs/schemas/*.json is out of sync with the Pydantic models
+	@uv run python scripts/generate_schemas.py >/dev/null
+	@if [ -n "$$(git status --porcelain docs/schemas/)" ]; then \
+		echo ""; \
+		echo "docs/schemas/ is out of sync — run 'make generate-schemas' and commit."; \
+		git status --short docs/schemas/; \
+		exit 1; \
+	fi
+
+all-checks: lint type-check test check-schemas ## Run all checks (lint, type-check, test, schema drift)
 	@echo ""
 	@echo "All checks passed!"
 

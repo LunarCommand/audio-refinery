@@ -1,6 +1,6 @@
 [project]
 name = "audio-refinery"
-version = "0.2.1"
+version = "0.2.2"
 description = "GPU-accelerated audio processing pipeline: vocal separation, speaker diarization, transcription, and sentiment analysis."
 readme = "README.md"
 license = { text = "MIT" }

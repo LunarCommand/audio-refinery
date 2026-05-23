@@ -1,0 +1,192 @@
+{
+  "$defs": {
+    "BatchTotals": {
+      "description": "Per-batch aggregate counts. Always sums to ``submitted``.",
+      "properties": {
+        "completed": {
+          "minimum": 0,
+          "title": "Completed",
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "submitted": {
+          "minimum": 0,
+          "title": "Submitted",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "submitted",
+        "completed",
+        "failed"
+      ],
+      "title": "BatchTotals",
+      "type": "object"
+    },
+    "JobSummaryEntry": {
+      "description": "One per-job record inside a ``BatchSummary``.\n\nThe ``status`` field discriminates between success and failure shapes.\nOn ``completed``, ``completed_at`` and ``duration_seconds`` are populated\nand ``failed_at``/``stage``/``error``/``retryable`` are None. On ``failed``,\nthe reverse holds.",
+      "properties": {
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "duration_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Seconds"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "failed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failed At"
+        },
+        "input_uri": {
+          "title": "Input Uri",
+          "type": "string"
+        },
+        "job_id": {
+          "title": "Job Id",
+          "type": "string"
+        },
+        "output_uri": {
+          "title": "Output Uri",
+          "type": "string"
+        },
+        "retryable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retryable"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "enum": [
+                "download",
+                "transcribe",
+                "upload",
+                "thermal_shutdown"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "input_uri",
+        "output_uri",
+        "status",
+        "started_at"
+      ],
+      "title": "JobSummaryEntry",
+      "type": "object"
+    }
+  },
+  "description": "One summary JSON per accepted batch.\n\nWritten to the caller-supplied ``summary_uri`` after every job in the\nbatch has reached a terminal state. The canonical surface for the\norchestrator to discover batch outcomes \u2014 successful job transcripts are\nalready on the analysis pipeline's wake signal by the time this is\nwritten.",
+  "properties": {
+    "batch_id": {
+      "title": "Batch Id",
+      "type": "string"
+    },
+    "completed_at": {
+      "format": "date-time",
+      "title": "Completed At",
+      "type": "string"
+    },
+    "jobs": {
+      "items": {
+        "$ref": "#/$defs/JobSummaryEntry"
+      },
+      "title": "Jobs",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "description": "Semver of the summary schema.",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "submitted_at": {
+      "format": "date-time",
+      "title": "Submitted At",
+      "type": "string"
+    },
+    "totals": {
+      "$ref": "#/$defs/BatchTotals"
+    }
+  },
+  "required": [
+    "batch_id",
+    "submitted_at",
+    "completed_at",
+    "jobs",
+    "totals"
+  ],
+  "title": "BatchSummary",
+  "type": "object"
+}

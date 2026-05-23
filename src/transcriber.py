@@ -235,15 +235,18 @@ def _build_segments(raw_segments: list[dict]) -> list[TranscriptSegment]:
     """Convert whisperx segment dicts to TranscriptSegment models."""
     segments = []
     for seg in raw_segments:
+        seg_speaker = seg.get("speaker")
         words = []
         for w in seg.get("words", []):
+            # Fall back to the enclosing segment's speaker when WhisperX's
+            # word-level diarization join misses (boundary-overlap gap).
             words.append(
                 WordSegment(
                     word=w.get("word", ""),
                     start=w.get("start") or 0.0,
                     end=w.get("end") or 0.0,
                     score=w.get("score"),
-                    speaker=w.get("speaker"),
+                    speaker=w.get("speaker") or seg_speaker,
                 )
             )
         segments.append(
@@ -252,7 +255,7 @@ def _build_segments(raw_segments: list[dict]) -> list[TranscriptSegment]:
                 start=seg.get("start", 0.0),
                 end=seg.get("end", 0.0),
                 words=words,
-                speaker=seg.get("speaker"),
+                speaker=seg_speaker,
             )
         )
     return segments
